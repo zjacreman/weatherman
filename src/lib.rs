@@ -7,12 +7,13 @@
 //! See `weather_api::*` for the deserializable response types and conversion helpers.
 
 pub mod app;
+pub mod config;
 pub mod ui;
 
 // Re-export key types from sub-modules for convenient downstream access.
 pub use app::{
-    App, AppState, CurrentWeather, DailyForecast, HourlyForecast, Location, Message,
-    TempUnit, WmoWeather,
+    App, AppState, CurrentWeather, DailyForecast, HourlyForecast, Location, Message, TempUnit,
+    WmoWeather,
 };
 pub use ratatui::style::Color;
 
@@ -150,4 +151,4 @@ mod weather_api {
 }
 
 // Expose the WeatherResponse struct and geocoding type for integration tests.
-pub use weather_api::{WeatherResponse, CurrentData, HourlyData, DailyData, GeocodingResult};
+pub use weather_api::{CurrentData, DailyData, GeocodingResult, HourlyData, WeatherResponse};

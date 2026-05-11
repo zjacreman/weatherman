@@ -21,6 +21,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
 use ratatui::Terminal;
 
+mod config;
 use app::{App, AppState, Message, WmoWeather};
 use chrono::Timelike;
 use chrono_tz::Tz;
@@ -52,6 +53,17 @@ async fn main() -> Result<()> {
 
 async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
     let mut app = App::new();
+
+    // Auto-load saved location on startup if one was persisted.
+    if let Some(name) = app.pending_auto_search.take() {
+        if let Ok(results) = api::geocoding::search(&name).await {
+            if let Some(loc) = results.first() {
+                app.location = Some(loc.clone());
+                app.state = AppState::LoadingWeather;
+            }
+        }
+    }
+
     let mut last_tick = std::time::Instant::now();
 
     loop {
@@ -134,6 +146,16 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Resul
                 }
             }
             AppState::Idle => {}
+        }
+    }
+
+    // Persist the current location on exit.
+    if let Some(ref loc) = app.location {
+        let config = config::SavedConfig {
+            name: loc.name.clone(),
+        };
+        if let Err(e) = config::save_config(&config, app.last_config_path.as_deref()) {
+            eprintln!("Failed to save config: {e}");
         }
     }
 

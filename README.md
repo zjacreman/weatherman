@@ -12,6 +12,7 @@ A fast, real-time terminal weather application built with **Rust**, [**ratatui**
 - 🎨 **Color-coded weather** — icons and terminal colors adapt to conditions
 - ⚡ **Fast startup** — compiled to a tiny native binary; instant renders
 - 🪟 **Modal search overlay** — clean search UI right inside the TUI
+- 💾 **Persistent location** — remembers your last-used city across sessions
 
 ## Screenshots (description)
 
@@ -46,7 +47,7 @@ cargo run
 
 ## Usage
 
-1. **Start** the application — you'll see the default idle view.
+1. **Start** the application — your previously saved location (if any) will be auto-loaded.
 2. Press **`S`** — opens the location search modal.
 3. Press **Enter** to search for the typed location.
 4. Use **↑/↓** (or `k`/`j`) to navigate results; press **Enter** to select.
@@ -68,6 +69,7 @@ cargo run
 | `U` | Toggle temperature unit (C ↔ F) |
 | `R` | Refresh weather data |
 | `Ctrl+C` | Quit the application |
+| `q` | Quit the application |
 
 ## How It Works
 
@@ -143,8 +145,9 @@ weatherman/
 │           ├── daily.rs
 │           ├── modal.rs
 │           └── status_bar.rs
-└── tests/
-    └── unit_tests.rs    # Integration tests for WMO codes, models, conversion
+│   ├── config.rs  # Persisted location loading/saving
+├── tests/
+│   └── unit_tests.rs    # Integration tests for WMO codes, models, conversion
 ```
 
 ### Key Modules
@@ -161,11 +164,26 @@ weatherman/
 ## Configuration
 
 | Config | Default | Description |
-|--------|---------|-------------|
+|--------|---------|------ |
 | Temperature unit | Celsius | Toggle with `U` |
 | Refresh interval | 300s | Auto-refreshes on every tick threshold |
 | Tick rate | 250ms | Terminal redraw rate |
 | Search count | 10 | Results per geocoding query |
+| Saved location | `~/.config/weatherman/weatherman.toml` | Last-used city name (checks config dir then cwd) |
+
+## Location Persistence
+
+Weatherman remembers your last-used location across sessions using a TOML config file:
+
+1. **Read order**: `~/.config/weatherman/weatherman.toml` (config dir) → `./weatherman.toml` (cwd)
+2. **Write target**: The path that was read at startup; defaults to config dir if neither existed
+3. **Format**:
+
+```toml
+name = "New York"
+```
+
+On startup, the app searches for the saved location name and auto-fetches weather. On exit, the current location is written back to the same file.
 
 ## Development
 
@@ -187,6 +205,11 @@ cargo clippy
 ```
 
 ## Bug Fixes
+
+#### v0.1.7 — Location Persistence
+- **Added: Persistent location across sessions** — App now saves the current location to `~/.config/weatherman/weatherman.toml` (or `./weatherman.toml`) on exit and auto-loads it on startup. Writes to the same path that was read at startup; defaults to config dir if neither existed.
+- **Added: Config module** (`src/config.rs`) with `load_config()` and `save_config()` functions using the `toml` crate.
+- **Added: Auto-load weather on startup** — If a saved location exists, the app searches for it and fetches weather automatically before entering the event loop.
 
 #### v0.1.5 — Tab System Simplification
 - **Fix: Simplified tab system** — Removed the broken 3-tab system (which caused phantom 'Index' state when pressing 3). Now uses exactly 2 tabs: **Daily** (default, shown on launch) and **Hourly** (toggle via `Tab` key). Removed number key shortcuts `1/2/3` and `h`/`l` — only `Tab` cycles tabs.

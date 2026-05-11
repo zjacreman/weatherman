@@ -30,6 +30,7 @@ cargo clippy -- -D warnings
 - **HTTP Client**: [reqwest 0.12](https://docs.rs/reqwest)
 - **Serialization**: [serde 1](https://serde.rs) + [serde_json 1](https://docs.rs/serde_json)
 - **Date/Time**: [chrono 0.4](https://docs.rs/chrono) with serde feature
+- **Config**: [toml 0.8](https://docs.rs/toml) for persisted location config
 
 ### Elm Architecture
 
@@ -68,6 +69,7 @@ weatherman/
 │   ├── main.rs              # Binary entry, event loop, key handling, drawing
 │   ├── lib.rs                # Library root — re-exports domain types
 │   ├── app.rs               # Core domain: App, Message, WmoWeather, models
+│   ├── config.rs            # Persisted location loading/saving
 │   ├── api/
 │   │   ├── mod.rs           # Module re-exports
 │   │   ├── client.rs        # reqwest HTTP client + URL builders
@@ -127,6 +129,25 @@ GET https://api.open-meteo.com/v1/forecast?latitude=<lat>&longitude=<lon>&curren
 **Hourly fields**: `temperature_2m`, `relative_humidity_2m`, `apparent_temperature`, `weather_code`, `precipitation`, `wind_speed_10m`
 
 **Daily fields**: `weather_code`, `temperature_2m_max`, `temperature_2m_min`, `sunrise`, `sunset`, `precipitation_sum`, `wind_speed_10m_max`
+
+### Config Persistence
+
+Location persistence uses `src/config.rs` with the `toml` crate:
+
+```rust
+pub struct SavedConfig {
+    pub name: String,
+}
+```
+
+- **Read order**: `~/.config/weatherman/weatherman.toml` (config dir) → `./weatherman.toml` (cwd)
+- **Write target**: The path read at startup; defaults to config dir if neither existed
+- **Format**:
+```toml
+name = "New York"
+```
+
+On startup, `App::new()` loads the saved config and sets `pending_auto_search`. The event loop in `main.rs` performs a geocoding search and auto-fetches weather before the event loop begins. On exit, `run_app()` writes the current location back to the same config file.
 
 ### WMO Weather Code Mapping (from `app.rs`)
 
@@ -235,6 +256,7 @@ All tests are in `tests/unit_tests.rs`. They exercise:
 - **Geocoding envelope** — verifies the `"results"` (plural) field in the outer geocoding response envelope.
 - **WMO weather codes** — tests for all WMO code variants including main clear, rime fog, freezing rain, snow grains, rain/snow showers, freezing drizzle.
 - **Tab system** — 2-tab toggle (Daily/Hourly), default tab verification
+- **Config persistence** — tests for `load_config()` (config dir then cwd fallback) and `save_config()` (uses last path or defaults to config dir)
 
 ### Adding New Tests
 

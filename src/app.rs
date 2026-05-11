@@ -92,7 +92,13 @@ impl WmoWeather {
 
     pub fn icon(&self, is_day: bool) -> &str {
         match self {
-            WmoWeather::ClearSky => if is_day { "\u{1F31E}" } else { "\u{1F319}" },
+            WmoWeather::ClearSky => {
+                if is_day {
+                    "\u{1F31E}"
+                } else {
+                    "\u{1F319}"
+                }
+            }
             WmoWeather::MainlyClear => "Mainly Clear",
             WmoWeather::PartlyCloudy => "\u{26C5}",
             WmoWeather::Overcast => "\u{2601}",
@@ -126,12 +132,24 @@ impl WmoWeather {
             WmoWeather::MainlyClear => Color::Rgb(255, 235, 59),
             WmoWeather::PartlyCloudy | WmoWeather::Overcast => Color::Rgb(200, 220, 255),
             WmoWeather::Fog | WmoWeather::DepositingRimeFog => Color::Rgb(150, 150, 160),
-            WmoWeather::LightDrizzle | WmoWeather::ModerateDrizzle | WmoWeather::DenseDrizzle => Color::Rgb(100, 149, 237),
-            WmoWeather::FreezingDrizzle | WmoWeather::DenseFreezingDrizzle | WmoWeather::FreezingRain => Color::Rgb(135, 206, 235),
-            WmoWeather::SlightRain | WmoWeather::ModerateRain | WmoWeather::HeavyRain => Color::Rgb(70, 130, 180),
-            WmoWeather::SlightSnow | WmoWeather::ModerateSnow | WmoWeather::HeavySnow | WmoWeather::SnowGrains | WmoWeather::SnowShowers => Color::Rgb(240, 248, 255),
+            WmoWeather::LightDrizzle | WmoWeather::ModerateDrizzle | WmoWeather::DenseDrizzle => {
+                Color::Rgb(100, 149, 237)
+            }
+            WmoWeather::FreezingDrizzle
+            | WmoWeather::DenseFreezingDrizzle
+            | WmoWeather::FreezingRain => Color::Rgb(135, 206, 235),
+            WmoWeather::SlightRain | WmoWeather::ModerateRain | WmoWeather::HeavyRain => {
+                Color::Rgb(70, 130, 180)
+            }
+            WmoWeather::SlightSnow
+            | WmoWeather::ModerateSnow
+            | WmoWeather::HeavySnow
+            | WmoWeather::SnowGrains
+            | WmoWeather::SnowShowers => Color::Rgb(240, 248, 255),
             WmoWeather::RainShowers => Color::Rgb(100, 149, 237),
-            WmoWeather::Thunderstorm | WmoWeather::ThunderstormWithHail => Color::Rgb(255, 105, 180),
+            WmoWeather::Thunderstorm | WmoWeather::ThunderstormWithHail => {
+                Color::Rgb(255, 105, 180)
+            }
             WmoWeather::Unknown(_) => Color::Gray,
         }
     }
@@ -267,6 +285,8 @@ pub struct App {
     pub is_quit: bool,
     pub auto_refresh_interval: Duration,
     pub tick_count: u64,
+    pub pending_auto_search: Option<String>,
+    pub last_config_path: Option<std::path::PathBuf>,
 }
 
 impl Default for App {
@@ -277,7 +297,7 @@ impl Default for App {
 
 impl App {
     pub fn new() -> Self {
-        Self {
+        let mut app = Self {
             state: AppState::Idle,
             location: None,
             current: None,
@@ -296,7 +316,17 @@ impl App {
             is_quit: false,
             auto_refresh_interval: Duration::from_secs(300),
             tick_count: 0,
+            pending_auto_search: None,
+            last_config_path: None,
+        };
+
+        // Load any previously saved location.
+        if let Some((config, path)) = crate::config::load_config() {
+            app.pending_auto_search = Some(config.name);
+            app.last_config_path = Some(path);
         }
+
+        app
     }
 
     pub fn is_quitting(&self) -> bool {
