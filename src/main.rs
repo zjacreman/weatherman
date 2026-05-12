@@ -26,7 +26,7 @@ use app::{App, AppState, Message, WmoWeather};
 use chrono::Timelike;
 use chrono_tz::Tz;
 
-const TICK_RATE: u64 = 250; // ms
+const TICK_RATE: u64 = 1000; // ms — each tick = 1 real second
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -77,8 +77,6 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Resul
         );
 
         let event = event::poll(Duration::from_millis(timeout))?;
-        last_tick = std::time::Instant::now();
-
         if event {
             let crossterm_event = event::read()?;
             if let CrosstermEvent::Key(key) = crossterm_event {
@@ -92,6 +90,7 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Resul
         }
 
         if last_tick.elapsed() >= Duration::from_millis(TICK_RATE) {
+            last_tick = std::time::Instant::now();
             app.update(Message::Tick);
         }
 

@@ -3,6 +3,7 @@
 //! ============================================================
 
 use weatherman::Color;
+use std::time::Duration;
 use weatherman::{App, AppState, Location, Message, SavedConfig, TempUnit, WmoWeather};
 use weatherman::{GeocodingResult, WeatherResponse};
 
@@ -806,4 +807,61 @@ fn last_update_format_is_local_hhmmss() {
     // Characters at positions 6 and 7 should be a valid second (00-59)
     let seconds: u8 = time_str[6..8].parse().unwrap_or(99);
     assert!(seconds <= 59, "seconds should be 00-59, got: '{}'", time_str);
+}
+
+// ────────────────────────────────────────────────────
+// Auto-refresh timer logic
+// ────────────────────────────────────────────────────
+
+#[test]
+fn auto_refresh_timer_with_location() {
+    let mut app = App::new();
+
+    // Set a small auto-refresh interval for testing
+    app.auto_refresh_interval = Duration::from_secs(5);
+
+    // Without a location, no refresh fires — state stays Idle
+    app.update(Message::Tick);
+    assert_eq!(app.tick_count, 1);
+    assert!(matches!(app.state, AppState::Idle));
+
+    app.update(Message::Tick);
+    assert_eq!(app.tick_count, 2);
+    assert!(matches!(app.state, AppState::Idle));
+
+    // Set a location so the refresh branch can trigger
+    app.location = Some(Location {
+        id: 1,
+        name: "Test City".to_string(),
+        admin1: Some("Test State".to_string()),
+        country: "Test Nation".to_string(),
+        country_code: "TN".to_string(),
+        latitude: 40.0,
+        longitude: -74.0,
+        timezone: "America/New_York".to_string(),
+        population: Some(100),
+    });
+
+    // Tick 3, 4 — still under threshold of 5
+    // (tick_count is currently 2 after the two ticks above)
+    app.update(Message::Tick);
+    assert_eq!(app.tick_count, 3);
+    // Still Idle because 3 < 5
+    assert!(matches!(app.state, AppState::Idle));
+
+    // 4th tick before threshold — tick_count crosses to 4
+    app.update(Message::Tick);
+    assert_eq!(app.tick_count, 4);
+    assert!(matches!(app.state, AppState::Idle));
+
+    // 5th tick — crosses the threshold of 5
+    app.update(Message::Tick);
+    // tick_count resets to 0
+    assert_eq!(app.tick_count, 0);
+    // State transitions to Refreshing because location is Some
+    assert!(matches!(app.state, AppState::Refreshing));
+
+    // Verify that once Refreshing, a WeatherFetched message resets to Idle
+    app.update(Message::WeatherFetched);
+    assert!(matches!(app.state, AppState::Idle));
 }
