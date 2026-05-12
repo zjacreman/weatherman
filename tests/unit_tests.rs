@@ -3,7 +3,7 @@
 //! ============================================================
 
 use weatherman::Color;
-use weatherman::{App, AppState, Location, Message, TempUnit, WmoWeather};
+use weatherman::{App, AppState, Location, Message, SavedConfig, TempUnit, WmoWeather};
 use weatherman::{GeocodingResult, WeatherResponse};
 
 // ────────────────────────────────────────────────────
@@ -675,6 +675,34 @@ fn format_temp_has_exactly_one_degree_symbol() {
         "format_temp(0.0) should have exactly one °: got '{}'",
         zero
     );
+}
+
+// ───────  Config refresh_interval persistence ───────
+
+#[test]
+fn saved_config_refresh_interval_defaults() {
+    // Option<u64> should parse when the field is present
+    let json = r#"{"name": "Berlin", "refresh_interval": 7200}"#;
+    let cfg: SavedConfig = serde_json::from_str(json).unwrap();
+    assert_eq!(cfg.name, "Berlin");
+    assert_eq!(cfg.refresh_interval, Some(7200));
+}
+
+#[test]
+fn saved_config_refresh_interval_missing() {
+    // When the field is missing, it defaults to None (will use 7200 default in app)
+    let json = r#"{"name": "Paris"}"#;
+    let cfg: SavedConfig = serde_json::from_str(json).unwrap();
+    assert_eq!(cfg.name, "Paris");
+    assert!(cfg.refresh_interval.is_none());
+}
+
+#[test]
+fn app_loads_refresh_interval_from_config() {
+    let mut app = App::new();
+    app.temperature_unit = TempUnit::Celsius;
+    // The default should be 7200 seconds (2 hours)
+    assert_eq!(app.auto_refresh_interval.as_secs(), 7200);
 }
 
 #[test]

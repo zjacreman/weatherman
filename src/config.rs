@@ -10,10 +10,11 @@ use std::path::{Path, PathBuf};
 /// The filename used for the persisted config file.
 const CONFIG_FILE_NAME: &str = "weatherman.toml";
 
-/// The last-used location name.
+/// The last-used location name and refresh interval.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SavedConfig {
     pub name: String,
+    pub refresh_interval: Option<u64>,
 }
 
 /// Return the path to `~/.config/weatherman/weatherman.toml`.
@@ -69,7 +70,7 @@ pub fn save_config(
     let target = last_config_path
         .map(|p| p.to_path_buf())
         .or_else(|| Some(config_path()))
-        .unwrap_or_else(|| cwd_config_path());
+        .unwrap_or_else(cwd_config_path);
 
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent)?;

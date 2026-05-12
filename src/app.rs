@@ -314,7 +314,7 @@ impl App {
             temperature_unit: TempUnit::Celsius,
             active_tab: 0,
             is_quit: false,
-            auto_refresh_interval: Duration::from_secs(300),
+            auto_refresh_interval: Duration::from_secs(7200),
             tick_count: 0,
             pending_auto_search: None,
             last_config_path: None,
@@ -323,6 +323,7 @@ impl App {
         // Load any previously saved location.
         if let Some((config, path)) = crate::config::load_config() {
             app.pending_auto_search = Some(config.name);
+            app.auto_refresh_interval = Duration::from_secs(config.refresh_interval.unwrap_or(7200));
             app.last_config_path = Some(path);
         }
 

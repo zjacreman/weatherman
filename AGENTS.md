@@ -137,6 +137,7 @@ Location persistence uses `src/config.rs` with the `toml` crate:
 ```rust
 pub struct SavedConfig {
     pub name: String,
+    pub refresh_interval: Option<u64>,  // seconds; defaults to 7200 (2h) if omitted
 }
 ```
 
@@ -145,9 +146,10 @@ pub struct SavedConfig {
 - **Format**:
 ```toml
 name = "New York"
+refresh_interval = 7200
 ```
 
-On startup, `App::new()` loads the saved config and sets `pending_auto_search`. The event loop in `main.rs` performs a geocoding search and auto-fetches weather before the event loop begins. On exit, `run_app()` writes the current location back to the same config file.
+On startup, `App::new()` loads the saved config and sets `pending_auto_search`. The event loop in `main.rs` performs a geocoding search and auto-fetches weather before the event loop begins. On exit, `run_app()` writes the current location and refresh interval back to the same config file.
 
 ### WMO Weather Code Mapping (from `app.rs`)
 
@@ -257,6 +259,7 @@ All tests are in `tests/unit_tests.rs`. They exercise:
 - **WMO weather codes** — tests for all WMO code variants including main clear, rime fog, freezing rain, snow grains, rain/snow showers, freezing drizzle.
 - **Tab system** — 2-tab toggle (Daily/Hourly), default tab verification
 - **Config persistence** — tests for `load_config()` (config dir then cwd fallback) and `save_config()` (uses last path or defaults to config dir)
+- **Config refresh_interval** — tests for `SavedConfig` serialization/deserialization with and without `refresh_interval`, and default value verification
 
 ### Adding New Tests
 

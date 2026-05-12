@@ -166,7 +166,7 @@ weatherman/
 | Config | Default | Description |
 |--------|---------|------ |
 | Temperature unit | Celsius | Toggle with `U` |
-| Refresh interval | 300s | Auto-refreshes on every tick threshold |
+| Refresh interval | 7200s (2h) | Configurable in `weatherman.toml` as `refresh_interval` |
 | Tick rate | 250ms | Terminal redraw rate |
 | Search count | 10 | Results per geocoding query |
 | Saved location | `~/.config/weatherman/weatherman.toml` | Last-used city name (checks config dir then cwd) |
@@ -181,9 +181,13 @@ Weatherman remembers your last-used location across sessions using a TOML config
 
 ```toml
 name = "New York"
+refresh_interval = 7200
 ```
 
-On startup, the app searches for the saved location name and auto-fetches weather. On exit, the current location is written back to the same file.
+- `name` (required): The last-used city name for auto-loading on startup.
+- `refresh_interval` (optional): Auto-refresh interval in seconds. Default is 7200 (2 hours) if omitted.
+
+On startup, the app searches for the saved location name and auto-fetches weather. On exit, the current location and refresh interval are written back to the same file. The status bar shows a countdown to the next auto-refresh.
 
 ## Development
 

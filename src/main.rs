@@ -153,6 +153,7 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Resul
     if let Some(ref loc) = app.location {
         let config = config::SavedConfig {
             name: loc.name.clone(),
+            refresh_interval: Some(app.auto_refresh_interval.as_secs()),
         };
         if let Err(e) = config::save_config(&config, app.last_config_path.as_deref()) {
             eprintln!("Failed to save config: {e}");
@@ -218,14 +219,26 @@ fn draw(area: Rect, app: &App, frame: &mut ratatui::Frame) {
         } else {
             &last_time
         };
+        let remaining_secs = if app.tick_count < app.auto_refresh_interval.as_secs() {
+            app.auto_refresh_interval.as_secs() - app.tick_count
+        } else {
+            0
+        };
+        let remaining_mins = remaining_secs / 60;
+        let remaining_s = remaining_secs % 60;
+        let refresh_display = if remaining_secs > 0 {
+            format!("{:02}:{:02}", remaining_mins, remaining_s)
+        } else {
+            "REF".to_string()
+        };
         let tab_display = match app.active_tab {
             0 => "daily",
             1 => "hourly",
             _ => "?",
         };
         format!(
-            " Last: {} | {} | Tab=cycles | S=search U=unit R=refresh Esc=clear Q=quit",
-            time_slice, tab_display
+            " Last: {} | {} | Ref: {} | Tab=cycles | S=search U=unit R=refresh Esc=clear Q=quit",
+            time_slice, tab_display, refresh_display
         )
     } else {
         " Press S to search for a location ".into()

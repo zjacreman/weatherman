@@ -15,6 +15,7 @@ pub use app::{
     App, AppState, CurrentWeather, DailyForecast, HourlyForecast, Location, Message, TempUnit,
     WmoWeather,
 };
+pub use config::SavedConfig;
 pub use ratatui::style::Color;
 
 // Re-export ui helpers for testing
