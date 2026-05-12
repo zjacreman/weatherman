@@ -752,3 +752,58 @@ fn saturating_sub_prevents_zero_height_overflow() {
     let usable_ten = ten_height.saturating_sub(2);
     assert_eq!(usable_ten, 8, "ten height minus 2 should be 8");
 }
+
+// ────────────────────────────────────────────────────
+// Local time fix — last_update uses local time, not UTC
+// ──────────────────────────────
+
+#[test]
+fn last_update_format_is_local_hhmmss() {
+    let mut app = App::new();
+
+    // Initially last_update is None
+    assert!(app.last_update.is_none());
+
+    // Trigger WeatherFetched which sets last_update
+    app.update(Message::WeatherFetched);
+
+    // last_update should now be set
+    assert!(app.last_update.is_some());
+
+    let time_str = app.last_update.unwrap();
+
+    // Format should be HH:MM:SS — exactly 8 characters
+    assert_eq!(
+        time_str.len(),
+        8,
+        "last_update should be HH:MM:SS format (8 chars), got: '{}'",
+        time_str
+    );
+
+    // Should contain exactly two colons (at positions 2 and 5)
+    assert_eq!(
+        time_str.chars().filter(|c| *c == ':').count(),
+        2,
+        "last_update should contain exactly two colons, got: '{}'",
+        time_str
+    );
+
+    // Should NOT end with 'Z' (which would indicate UTC)
+    assert!(
+        !time_str.ends_with('Z'),
+        "last_update should NOT be UTC (no trailing Z), got: '{}'",
+        time_str
+    );
+
+    // First two chars should be valid digits (hours 00-23)
+    let hours: u8 = time_str[..2].parse().unwrap_or(99);
+    assert!(hours <= 23, "hours should be 00-23, got: '{}'", time_str);
+
+    // Characters at positions 3 and 4 should be a valid minute (00-59)
+    let minutes: u8 = time_str[3..5].parse().unwrap_or(99);
+    assert!(minutes <= 59, "minutes should be 00-59, got: '{}'", time_str);
+
+    // Characters at positions 6 and 7 should be a valid second (00-59)
+    let seconds: u8 = time_str[6..8].parse().unwrap_or(99);
+    assert!(seconds <= 59, "seconds should be 00-59, got: '{}'", time_str);
+}

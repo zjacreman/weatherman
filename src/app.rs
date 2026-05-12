@@ -402,7 +402,7 @@ impl App {
             }
             Message::WeatherFetched => {
                 self.state = AppState::Idle;
-                self.last_update = Some(chrono::Utc::now().to_rfc3339());
+                self.last_update = Some(chrono::Local::now().format("%H:%M:%S").to_string());
             }
             Message::WeatherError(e) => {
                 self.state = AppState::Idle;

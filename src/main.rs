@@ -214,11 +214,6 @@ fn draw(area: Rect, app: &App, frame: &mut ratatui::Frame) {
         format!(" Search: {} ", app.search_query)
     } else if app.last_update.is_some() {
         let last_time = app.last_update.clone().unwrap_or_default();
-        let time_slice = if last_time.len() >= 19 {
-            &last_time[11..19]
-        } else {
-            &last_time
-        };
         let remaining_secs = if app.tick_count < app.auto_refresh_interval.as_secs() {
             app.auto_refresh_interval.as_secs() - app.tick_count
         } else {
@@ -238,7 +233,7 @@ fn draw(area: Rect, app: &App, frame: &mut ratatui::Frame) {
         };
         format!(
             " Last: {} | {} | Ref: {} | Tab=cycles | S=search U=unit R=refresh Esc=clear Q=quit",
-            time_slice, tab_display, refresh_display
+            &last_time, tab_display, refresh_display
         )
     } else {
         " Press S to search for a location ".into()

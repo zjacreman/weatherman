@@ -52,7 +52,7 @@ Message enum variant
     →
 App::update(msg)
     →
-State mutation (last_update, search_results, error_message, etc.)
+State mutation (last_update in local HH:MM:SS, search_results, error_message, etc.)
     →
 terminal.draw(|frame| draw(frame.area(), &app, frame))
     →
@@ -230,11 +230,19 @@ The main loop in `main.rs` interleaves:
 - `Ctrl+U` — Clear search query
 - `Esc` — Close modal and clear search
 
+### Time Storage Note
+
+The `last_update` field stores time as `HH:MM:SS` in the system's local timezone (using `chrono::Local`), not UTC. This avoids confusion in the status bar.
+
 ### Adding a New API Field
 
 1. Add the field to the `#[derive(Deserialize)]` struct in `api/weather.rs` or `api/geocoding.rs`.
 2. Map it to the domain model in `From<...>` impls inside `app.rs`.
 3. Pass through to the widget/display layer as needed.
+
+### Status Bar / Footer
+
+The bottom status bar displays the `last_update` time in `HH:MM:SS` format in the system's local timezone (no timezone suffix). Time is produced using `chrono::Local`.
 
 **Important**: `is_day` from Open-Meteo is returned as `f64` (0.0 or 1.0), NOT as a boolean. You MUST change the deserialization struct field to `f64` and convert it to bool with `!= 0.0` in the From impl.
 

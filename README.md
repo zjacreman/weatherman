@@ -21,7 +21,7 @@ The terminal displays **three regions** in a compact layout:
 1. **Top bar** — weather icon (adaptive ☀️/🌙/⛅/🌧️/snowflake/thunderbolt), city name, current temperature in yellow, and apparent temperature in cyan.
 2. **Left panel** — detailed current conditions (temperature, apparent temp, humidity, wind, precipitation, location, timestamp).
 3. **Right panel** — tabbed content with two sub-tabs: **Hourly** (next 24 hours) and **Daily** (multi-day forecast). Each row shows day/date, icon, high/low temperatures color-coded (red/green), and precip.
-4. **Bottom bar** — status line: last update time, active unit, active tab, and key shortcuts. A modal overlay appears for location search.
+4. **Bottom bar** — status line: last update time (local), active unit, active tab, and key shortcuts. A modal overlay appears for location search.
 
 ## Installation
 
