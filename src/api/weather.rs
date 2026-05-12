@@ -32,6 +32,7 @@ struct HourlyData {
     pub weather_code: Vec<u8>,
     pub precipitation: Vec<f32>,
     pub wind_speed_10m: Vec<f32>,
+    pub is_day: Vec<f64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -72,6 +73,7 @@ impl From<WeatherResponse> for (CurrentWeather, HourlyForecast, DailyForecast) {
                 weather_codes: h.weather_code,
                 precipitations: h.precipitation,
                 wind_speeds: h.wind_speed_10m,
+                is_day: h.is_day.iter().map(|v| *v != 0.0).collect(),
             },
             DailyForecast {
                 dates: d.time,

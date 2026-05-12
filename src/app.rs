@@ -99,7 +99,13 @@ impl WmoWeather {
                     "\u{1F319}"
                 }
             }
-            WmoWeather::MainlyClear => "Mainly Clear",
+            WmoWeather::MainlyClear => {
+                if is_day {
+                    "\u{1F32E}"
+                } else {
+                    "\u{1F319}"
+                }
+            }
             WmoWeather::PartlyCloudy => "\u{26C5}",
             WmoWeather::Overcast => "\u{2601}",
             WmoWeather::Fog => "\u{1F32B}",
@@ -113,7 +119,7 @@ impl WmoWeather {
             WmoWeather::ModerateRain => "\u{1F327}",
             WmoWeather::HeavyRain => "\u{1F327}",
             WmoWeather::FreezingRain => "\u{1F32B}",
-            WmoWeather::SlightSnow => "Light Snowfall",
+            WmoWeather::SlightSnow => "\u{2744}",
             WmoWeather::ModerateSnow => "\u{2744}",
             WmoWeather::HeavySnow => "\u{2744}",
             WmoWeather::SnowGrains => "\u{2744}",
@@ -202,6 +208,7 @@ pub struct HourlyForecast {
     pub weather_codes: Vec<u8>,
     pub precipitations: Vec<f32>,
     pub wind_speeds: Vec<f32>,
+    pub is_day: Vec<bool>,
 }
 
 #[derive(Debug, Clone)]

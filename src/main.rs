@@ -379,11 +379,9 @@ fn render_hourly_tab(app: &App, area: Rect, frame: &mut ratatui::Frame) {
             } else {
                 time.clone()
             };
-            let hour_num: u32 = hour_str.parse().unwrap_or(0);
             let temp = app.format_temp(hourly.temperatures[idx]);
             let wmo = WmoWeather::from(hourly.weather_codes[idx]);
-            // Derive is_day from hour: dawn ~6am, dusk ~8pm
-            let is_day = (6..=20).contains(&hour_num);
+            let is_day = hourly.is_day[idx];
             let prec = format!("{:.1}mm", hourly.precipitations[idx]);
             lines.push(format!(
                 "{} | {} {} | 💧{}\n",
@@ -546,12 +544,11 @@ fn render_search_modal(app: &App, area: Rect, frame: &mut ratatui::Frame) {
         )));
         content_lines.push(Line::from(Span::styled(" ", bg)));
         content_lines.push(Line::from(Span::styled(
-            " Esc=close ",
+            " Type a location, then Enter to search ",
             Style::default().fg(Color::DarkGray).bg(Color::DarkGray),
         )));
-        content_lines.push(Line::from(Span::styled(" ", bg)));
         content_lines.push(Line::from(Span::styled(
-            " Esc=close ",
+            " Enter=search · Esc=close ",
             Style::default().fg(Color::DarkGray).bg(Color::DarkGray),
         )));
     }

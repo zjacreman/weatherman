@@ -167,7 +167,7 @@ weatherman/
 |--------|---------|------ |
 | Temperature unit | Celsius | Toggle with `U` |
 | Refresh interval | 7200s (2h) | Configurable in `weatherman.toml` as `refresh_interval` |
-| Tick rate | 250ms | Terminal redraw rate |
+| Tick rate | 1000ms | Terminal redraw rate |
 | Search count | 10 | Results per geocoding query |
 | Saved location | `~/.config/weatherman/weatherman.toml` | Last-used city name (checks config dir then cwd) |
 

@@ -185,7 +185,7 @@ On startup, `App::new()` loads the saved config and sets `pending_auto_search`. 
 
 ### Tick Timeout
 
-The tick timeout uses `saturating_sub` to prevent unsigned integer underflow when a loop iteration takes longer than `TICK_RATE` (250ms):
+The tick timeout uses `saturating_sub` to prevent unsigned integer underflow when a loop iteration takes longer than `TICK_RATE` (1000ms):
 
 ```rust
 let timeout = std::cmp::min(
@@ -194,7 +194,7 @@ let timeout = std::cmp::min(
 );
 ```
 
-Without `saturating_sub`, elapsed times exceeding 250ms (common during slow network requests like geocoding search) would cause a "subtract with overflow" panic in release mode and a debug assertion in debug mode.
+Without `saturating_sub`, elapsed times exceeding 1000ms (common during slow network requests like geocoding search) would cause a "subtract with overflow" panic in release mode and a debug assertion in debug mode.
 
 ---
 
@@ -203,7 +203,7 @@ Without `saturating_sub`, elapsed times exceeding 250ms (common during slow netw
 The main loop in `main.rs` interleaves:
 
 1. **Terminal draw** — `terminal.draw(|frame| ...)` each tick.
-2. **Crossterm event poll** — blocks up to 250ms waiting for a key.
+2. **Crossterm event poll** — blocks up to 1000ms waiting for a key.
 3. **Key handling** — `handle_key()` returns bool for handled/unhandled.
 4. **State-based async dispatch** — based on `AppState` enum, launches API tasks via `async move {}`.
 

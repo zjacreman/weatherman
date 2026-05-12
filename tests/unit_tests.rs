@@ -325,7 +325,8 @@ fn deserialize_weather_response() {
         "relative_humidity_2m": [48, 46, 45, 43],
         "weather_code": [2, 2, 2, 1],
         "precipitation": [0.0, 0.0, 0.0, 0.0],
-        "wind_speed_10m": [14.0, 15.3, 16.1, 17.2]
+        "wind_speed_10m": [14.0, 15.3, 16.1, 17.2],
+        "is_day": [1.0, 1.0, 1.0, 1.0]
       },
       "daily": {
         "time": ["2026-05-10", "2026-05-11"],
@@ -425,7 +426,8 @@ fn deserialize_weather_response_is_day_as_number() {
         "relative_humidity_2m": [72, 74],
         "weather_code": [0, 1],
         "precipitation": [0.0, 0.0],
-        "wind_speed_10m": [8.5, 9.0]
+        "wind_speed_10m": [8.5, 9.0],
+        "is_day": [0.0, 0.0]
       },
       "daily": {
         "time": ["2026-05-10"],
@@ -471,7 +473,8 @@ fn deserialize_runtime_weather_response_with_options() {
         "relative_humidity_2m": [45],
         "weather_code": [2],
         "precipitation": [0.0],
-        "wind_speed_10m": [15.3]
+        "wind_speed_10m": [15.3],
+        "is_day": [1.0]
       },
       "daily": {
         "time": ["2026-05-10"],
@@ -599,7 +602,7 @@ fn daily_is_default_tab() {
 #[test]
 fn tick_timeout_zero_elapsed() {
     // When elapsed == 0, saturating_sub returns tick_rate exactly
-    let tick_rate: u64 = 250;
+    let tick_rate: u64 = 1000;
     let elapsed: u64 = 0;
     let timeout = tick_rate.saturating_sub(elapsed);
     assert_eq!(timeout, tick_rate);
@@ -609,8 +612,8 @@ fn tick_timeout_zero_elapsed() {
 fn tick_timeout_saturating_sub_overflows() {
     // saturating_sub gracefully returns 0 instead of panicking on underflow.
     // This was the bug: TICK_RATE - elapsed panicked when elapsed > TICK_RATE.
-    let tick_rate: u64 = 250;
-    let elapsed: u64 = 500;
+    let tick_rate: u64 = 1000;
+    let elapsed: u64 = 2000;
     let timeout = tick_rate.saturating_sub(elapsed);
     assert_eq!(timeout, 0);
 }
@@ -618,8 +621,8 @@ fn tick_timeout_saturating_sub_overflows() {
 #[test]
 fn tick_timeout_saturating_sub_exactly_at_tick_rate() {
     // When elapsed == TICK_RATE, timeout should be 0
-    let tick_rate: u64 = 250;
-    let elapsed: u64 = 250;
+    let tick_rate: u64 = 1000;
+    let elapsed: u64 = 1000;
     let timeout = tick_rate.saturating_sub(elapsed);
     assert_eq!(timeout, 0);
 }
@@ -630,7 +633,7 @@ fn tick_timeout_saturating_sub_full_path() {
     //   let timeout = std::cmp::min(tick_rate.saturating_sub(elapsed), tick_rate);
     // When elapsed far exceeds TICK_RATE (e.g., network call during search),
     // the timeout should clamp to 0, not panic.
-    let tick_rate: u64 = 250;
+    let tick_rate: u64 = 1000;
     let elapsed: u64 = 9999;
     let timeout = std::cmp::min(tick_rate.saturating_sub(elapsed), tick_rate);
     assert_eq!(timeout, 0);
@@ -639,7 +642,7 @@ fn tick_timeout_saturating_sub_full_path() {
 #[test]
 fn tick_timeout_saturating_sub_min_clamp() {
     // When elapsed == 0, min(TICK_RATE, TICK_RATE) == TICK_RATE
-    let tick_rate: u64 = 250;
+    let tick_rate: u64 = 1000;
     let elapsed: u64 = 0;
     let timeout = std::cmp::min(tick_rate.saturating_sub(elapsed), tick_rate);
     assert_eq!(timeout, tick_rate);
