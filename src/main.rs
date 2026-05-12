@@ -315,7 +315,8 @@ fn render_tabbed_content(app: &App, area: Rect, frame: &mut ratatui::Frame) {
         inner_area.top() + 1,
         inner_area.width,
         inner_area.height.saturating_sub(1),
-    );
+    )
+    .inner(Margin::new(3, 0));
 
     match tab_idx {
         0 => render_daily_tab(app, content_area, frame),
@@ -370,7 +371,7 @@ fn render_hourly_tab(app: &App, area: Rect, frame: &mut ratatui::Frame) {
         let available = hourly.times.len().saturating_sub(start_idx);
         let count = std::cmp::min(max_data_rows, available);
 
-        let mut lines: Vec<String> = vec![format!("  Next {} hours\n", count)];
+        let mut lines: Vec<String> = vec![format!("Next {} hours\n", count)];
         for i in 0..count {
             let idx = start_idx + i;
             let time = &hourly.times[idx];
@@ -386,7 +387,7 @@ fn render_hourly_tab(app: &App, area: Rect, frame: &mut ratatui::Frame) {
             let is_day = (6..=20).contains(&hour_num);
             let prec = format!("{:.1}mm", hourly.precipitations[idx]);
             lines.push(format!(
-                "  {} | {} {} | 💧{}\n",
+                "{} | {} {} | 💧{}\n",
                 Span::styled(&hour_str, Style::default().fg(Color::Yellow)),
                 Span::styled(
                     format!("{} {}", wmo.icon(is_day), temp),
@@ -398,7 +399,7 @@ fn render_hourly_tab(app: &App, area: Rect, frame: &mut ratatui::Frame) {
         }
         lines.join("")
     } else if area.height > 1 && area.width > 0 {
-        "\n  No hourly data available.\n".into()
+        "\nNo hourly data available.\n".into()
     } else {
         String::new()
     };
@@ -415,7 +416,7 @@ fn render_daily_tab(app: &App, area: Rect, frame: &mut ratatui::Frame) {
         let count = std::cmp::min(daily.dates.len(), area.height.saturating_sub(2) as usize);
         let mut all_temps: Vec<f32> = daily.temp_high.clone();
         all_temps.extend(daily.temp_low.clone());
-        let mut lines: Vec<String> = vec![format!("  {} day forecast\n\n", count)];
+        let mut lines: Vec<String> = vec![format!("{} day forecast\n\n", count)];
 
         if let Some(ref h) = app.hourly {
             for &t in &h.temperatures {
@@ -435,7 +436,7 @@ fn render_daily_tab(app: &App, area: Rect, frame: &mut ratatui::Frame) {
             let wind = app.format_wind_speed(daily.wind_max[i]);
 
             lines.push(format!(
-                "  {} | {} | {} | {} | 💧 {} | 🌬️ {}\n",
+                "{} | {} | {} | {} | 💧 {} | 🌬️ {}\n",
                 Span::styled(day_name, Style::default().fg(Color::Yellow)),
                 Span::styled(app.format_temp(high), Style::default().fg(Color::Red)),
                 Span::styled(app.format_temp(low), Style::default().fg(Color::Blue)),
@@ -449,7 +450,7 @@ fn render_daily_tab(app: &App, area: Rect, frame: &mut ratatui::Frame) {
         }
         lines.join("")
     } else if area.height > 1 && area.width > 0 {
-        "\n  No daily data available.\n".into()
+        "\nNo daily data available.\n".into()
     } else {
         String::new()
     };

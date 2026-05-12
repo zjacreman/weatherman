@@ -13,7 +13,7 @@ impl Widget for CurrentWidget<'_> {
             .title_alignment(Alignment::Center);
         block.render(area, buf);
 
-        let content_area = area.inner(Margin::new(1, 1));
+        let content_area = area.inner(Margin::new(3, 1));
 
         if self.app.location.is_none() || self.app.current.is_none() {
             Paragraph::new("No location selected")
