@@ -2,7 +2,9 @@
 //!  Weather TUI — integration tests for the domain layer
 //! ============================================================
 
+use weatherman::config;
 use weatherman::Color;
+use weatherman::api::client;
 use std::time::Duration;
 use weatherman::{App, AppState, Location, Message, SavedConfig, TempUnit, WmoWeather};
 use weatherman::{GeocodingResult, WeatherResponse};
@@ -867,4 +869,271 @@ fn auto_refresh_timer_with_location() {
     // Verify that once Refreshing, a WeatherFetched message resets to Idle
     app.update(Message::WeatherFetched);
     assert!(matches!(app.state, AppState::Idle));
+}
+
+// ────────────────────────────────────────────────
+// Config persistence tests
+// All tests use test-safe config directory functions (load_config_from_dir,
+// save_config_to_dir) that do NOT depend on HOME, preventing accidental
+// writes to the user's real config file.
+// ──────────────────────────────────────────────
+
+#[test]
+fn config_save_load_roundtrip() {
+    let temp_dir = std::env::temp_dir().join("weatherman_test_roundtrip");
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    std::fs::create_dir_all(&temp_dir).unwrap();
+
+    let config_dir = temp_dir.join(".config").join("weatherman");
+    std::fs::create_dir_all(&config_dir).unwrap();
+
+    let config_file = config_dir.join("weatherman.toml");
+    let toml_content = format!(
+        r#"name = "Test City"
+refresh_interval = 3600
+"#
+    );
+    std::fs::write(&config_file, toml_content).unwrap();
+
+    let (config, loaded_path) =
+        weatherman::config::load_config_from_dir(&config_dir)
+            .expect("should load saved config from config dir");
+    assert_eq!(config.name, "Test City");
+    assert_eq!(config.refresh_interval, Some(3600));
+    assert_eq!(loaded_path, config_file);
+
+    // Save using the directory-safe function
+    let temp_dir2 = std::env::temp_dir().join("weatherman_test_save2");
+    let _ = std::fs::remove_dir_all(&temp_dir2);
+    std::fs::create_dir_all(&temp_dir2).unwrap();
+
+    let config_dir2 = temp_dir2.join(".config").join("weatherman");
+    let config2 = weatherman::SavedConfig {
+        name: "Roundtrip City".to_string(),
+        refresh_interval: Some(7200),
+    };
+    let saved_path = weatherman::config::save_config_to_dir(&config2, None, &config_dir2)
+        .expect("should save config successfully");
+    assert!(saved_path.exists());
+    let contents = std::fs::read_to_string(&saved_path).unwrap();
+    assert!(contents.contains("Roundtrip City"));
+    assert!(contents.contains("7200"));
+
+    // Cleanup
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    let _ = std::fs::remove_dir_all(&temp_dir2);
+}
+
+#[test]
+fn config_save_creates_parent_dirs() {
+    let temp_dir = std::env::temp_dir().join("weatherman_test_save");
+    let _ = std::fs::remove_dir_all(&temp_dir);
+
+    // Do NOT create any directories — the save function should create them
+    let config_dir = temp_dir.join(".config").join("weatherman");
+
+    let config = weatherman::SavedConfig {
+        name: "Test City".to_string(),
+        refresh_interval: Some(7200),
+    };
+
+    let saved_path = weatherman::config::save_config_to_dir(&config, None, &config_dir)
+        .expect("should save config successfully");
+
+    assert!(saved_path.exists(), "config file should exist on disk");
+    let contents = std::fs::read_to_string(&saved_path)
+        .expect("should be able to read saved config");
+    assert!(contents.contains("Test City"), "saved content should contain the name");
+    assert!(contents.contains("7200"), "saved content should contain refresh_interval");
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn config_load_returns_none_when_no_config_file() {
+    let temp_dir = std::env::temp_dir().join("weatherman_test_none");
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    std::fs::create_dir_all(&temp_dir).unwrap();
+
+    let config_dir = temp_dir.join(".config").join("weatherman");
+
+    let result = weatherman::config::load_config_from_dir(&config_dir);
+    assert!(
+        result.is_none(),
+        "should return None when no config file exists"
+    );
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+// ──────────────────api/client.rs tests ──────────────────
+// ──────────────────────────────────────────────────────
+
+#[test]
+fn encode_query_preserves_ascii_safe_chars() {
+    // Safe characters pass through unchanged
+    assert_eq!(client::encode_query("ABC"), "ABC");
+    assert_eq!(client::encode_query("abc"), "abc");
+    assert_eq!(client::encode_query("0123456789"), "0123456789");
+    assert_eq!(client::encode_query("-_.~"), "-_.~");
+}
+
+#[test]
+fn encode_query_spaces_become_percent_encoded() {
+    assert_eq!(client::encode_query("New York"), "New%20York");
+    assert_eq!(client::encode_query(" "), "%20");
+    assert_eq!(client::encode_query("hello world"), "hello%20world");
+}
+
+#[test]
+fn encode_query_unicode_become_percent_encoded() {
+    // The implementation encodes bytes individually as hex
+    let result = client::encode_query("München");
+    assert!(result.contains("M%"));
+    assert!(!result.contains(" München"));
+}
+
+#[test]
+fn geocoding_url_format() {
+    let url = client::geocoding_url("London", 10);
+    assert!(url.starts_with("https://geocoding-api.open-meteo.com/v1/search?"));
+    assert!(url.contains("name=London"));
+    assert!(url.contains("&count=10"));
+    assert!(url.contains("&language=en"));
+}
+
+#[test]
+fn geocoding_url_encodes_spaces() {
+    let url = client::geocoding_url("New York", 5);
+    assert!(url.contains("name=New%20York"));
+    assert!(url.contains("&count=5"));
+}
+
+#[test]
+fn forecast_url_format() {
+    let url = client::forecast_url(40.7128, -74.0060);
+    assert!(url.starts_with("https://api.open-meteo.com/v1/forecast?"));
+    assert!(url.contains("latitude=40.7128"));
+    assert!(url.contains("longitude=-74.0060"));
+    assert!(url.contains("&current="));
+    assert!(url.contains("&hourly="));
+    assert!(url.contains("&daily="));
+}
+
+// ──────────────────App::update state machine tests ──────────────
+// ────────────────────────────────────────────────────────────────
+
+#[test]
+fn search_clear_resets_state() {
+    let mut app = App::new();
+    app.search_query = "Berlin".to_string();
+    app.search_results = vec![Location {
+        id: 1, name: "Berlin".into(), admin1: Some("Berlin".into()),
+        country: "Germany".into(), country_code: "DE".into(),
+        latitude: 52.0, longitude: 13.0, timezone: "Europe/Berlin".into(),
+        population: None,
+    }];
+    app.search_modal_active = true;
+    app.state = AppState::LoadingSearch;
+
+    app.update(Message::SearchClear);
+
+    assert!(app.search_query.is_empty());
+    assert!(app.search_results.is_empty());
+    assert!(!app.search_modal_active);
+    assert!(matches!(app.state, AppState::Idle));
+}
+
+#[test]
+fn search_input_sets_query() {
+    let mut app = App::new();
+    app.update(Message::SearchInput("ber".into()));
+    assert_eq!(app.search_query, "ber");
+}
+
+#[test]
+fn weather_fetched_sets_last_update_and_idle() {
+    let mut app = App::new();
+    app.state = AppState::LoadingWeather;
+    app.update(Message::WeatherFetched);
+    assert!(matches!(app.state, AppState::Idle));
+    assert!(app.last_update.is_some());
+}
+
+#[test]
+fn search_error_shows_modal() {
+    let mut app = App::new();
+    app.update(Message::SearchError("network error".into()));
+    assert!(app.error_modal_visible);
+    assert_eq!(app.error_message.as_deref(), Some("network error"));
+}
+
+#[test]
+fn weather_error_shows_modal() {
+    let mut app = App::new();
+    app.update(Message::WeatherError("api down".into()));
+    assert!(app.error_modal_visible);
+    assert_eq!(app.error_message.as_deref(), Some("api down"));
+}
+
+#[test]
+fn toggle_unit_roundtrip() {
+    let mut app = App::new();
+    assert!(matches!(app.temperature_unit, TempUnit::Celsius));
+    app.update(Message::ToggleUnit);
+    assert!(matches!(app.temperature_unit, TempUnit::Fahrenheit));
+    app.update(Message::ToggleUnit);
+    assert!(matches!(app.temperature_unit, TempUnit::Celsius));
+}
+
+#[test]
+fn show_error_sets_modal() {
+    let mut app = App::new();
+    app.show_error("test error".to_string());
+    assert!(app.error_modal_visible);
+    assert_eq!(app.error_message.as_deref(), Some("test error"));
+}
+
+// ──────────────────Config module integration tests ──────────────
+// ─────────────────────────────────────────────────────────────────
+
+#[test]
+fn config_load_config_from_dir_returns_none_for_empty_dir() {
+    let temp_dir = std::env::temp_dir().join("weatherman_test_empty_dir");
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    std::fs::create_dir_all(&temp_dir).unwrap();
+
+    let result = config::load_config_from_dir(&temp_dir);
+    assert!(result.is_none());
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn config_save_config_to_dir_creates_nested_dirs() {
+    let temp_dir = std::env::temp_dir().join("weatherman_test_nested");
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    assert!(!temp_dir.exists());
+
+    let config = SavedConfig {
+        name: "Nested City".to_string(),
+        refresh_interval: Some(3600),
+    };
+
+    // Don't create any directories — the save should create them
+    let saved = config::save_config_to_dir(&config, None, &temp_dir).unwrap();
+    assert!(saved.exists());
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
+}
+
+#[test]
+fn forecast_url_contains_required_params() {
+    let url = client::forecast_url(52.52, 13.41);
+    // Verify key query parameters are present
+    assert!(url.contains("temperature_unit=celsius"));
+    assert!(url.contains("timezone=auto"));
+    assert!(url.contains("current=temperature_2m"));
+    assert!(url.contains("hourly=temperature_2m"));
+    assert!(url.contains("daily=weather_code"));
 }

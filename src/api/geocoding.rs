@@ -18,6 +18,7 @@ pub struct GeocodingResult {
     pub country_code: String,
     pub latitude: f64,
     pub longitude: f64,
+    #[allow(dead_code)]
     pub elevation: Option<f64>,
     pub timezone: String,
     pub population: Option<u64>,

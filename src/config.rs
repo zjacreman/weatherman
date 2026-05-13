@@ -7,8 +7,10 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-/// The filename used for the persisted config file.
 const CONFIG_FILE_NAME: &str = "weatherman.toml";
+
+/// The filename used for the persisted config file.
+const _CONFIG_FILE_NAME: &str = CONFIG_FILE_NAME;
 
 /// The last-used location name and refresh interval.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,60 +19,83 @@ pub struct SavedConfig {
     pub refresh_interval: Option<u64>,
 }
 
-/// Return the path to `~/.config/weatherman/weatherman.toml`.
-fn config_path() -> PathBuf {
+/// Return the default config directory path: `~/.config/weatherman`.
+pub fn config_path() -> PathBuf {
     let home = std::env::var("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("."));
-    home.join(".config")
-        .join("weatherman")
-        .join(CONFIG_FILE_NAME)
+    home.join(".config").join("weatherman")
 }
 
-/// Return the path to `./weatherman.toml` in the current working directory.
-fn cwd_config_path() -> PathBuf {
-    PathBuf::from(CONFIG_FILE_NAME)
-}
-
-/// Try to load the saved config file.
+/// Internal helper to load config from a specific config directory path.
 ///
-/// Checks the config directory first, then the working directory.
-/// Returns the config along with the path it was loaded from.
-pub fn load_config() -> Option<(SavedConfig, PathBuf)> {
-    // 1. Check ~/.config/weatherman/weatherman.toml
-    let cfg = config_path();
+/// This function is used by both `load_config()` (production) and
+/// `load_config_from_dir()` (testing) to avoid code duplication.
+fn do_load_config(config_dir: &Path) -> Option<(SavedConfig, PathBuf)> {
+    let cfg = config_dir.join(CONFIG_FILE_NAME);
     if let Ok(contents) = std::fs::read_to_string(&cfg) {
         if let Ok(config) = toml::from_str(&contents) {
             return Some((config, cfg));
         }
     }
-
-    // 2. Check ./weatherman.toml
-    let cwd = cwd_config_path();
+    let cwd = PathBuf::from(CONFIG_FILE_NAME);
     if let Ok(contents) = std::fs::read_to_string(&cwd) {
         if let Ok(config) = toml::from_str(&contents) {
             return Some((config, cwd));
         }
     }
-
     None
+}
+
+/// Load the saved config from the default location (`~/.config/weatherman/`).
+///
+/// Checks the config directory first, then the working directory.
+/// Returns the config along with the path it was loaded from.
+pub fn load_config() -> Option<(SavedConfig, PathBuf)> {
+    let home = std::env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("."));
+    let config_dir = home.join(".config").join("weatherman");
+    do_load_config(&config_dir)
+}
+
+/// Load config from a specific directory path.
+///
+/// This function is **test-safe**: it does _not_ rely on the `HOME`
+/// environment variable and will never write to the user's real config
+/// directory. Tests should prefer this function over `load_config()`.
+///
+/// # Arguments
+///
+/// * `dir` — A directory that should contain (or will contain)
+///   `.config/weatherman/weatherman.toml`.
+#[allow(dead_code)]
+pub fn load_config_from_dir(dir: &Path) -> Option<(SavedConfig, PathBuf)> {
+    do_load_config(dir)
 }
 
 /// Save the config to disk.
 ///
 /// Uses `last_config_path` if provided (meaning a config was read at startup),
-/// otherwise falls back to the config directory.
+/// otherwise falls back to the given `config_dir`.
 ///
 /// Creates parent directories as needed.
 /// Returns the path that was written to.
+///
+/// # Arguments
+///
+/// * `config` — The configuration to save.
+/// * `last_config_path` — Previously loaded config path, if any.
+/// * `config_dir` — The base config directory to use when no previous path exists.
 pub fn save_config(
     config: &SavedConfig,
     last_config_path: Option<&Path>,
+    config_dir: &Path,
 ) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let target = last_config_path
-        .map(|p| p.to_path_buf())
-        .or_else(|| Some(config_path()))
-        .unwrap_or_else(cwd_config_path);
+    let target = match last_config_path {
+        Some(p) => p.to_path_buf(),
+        None => config_dir.join(CONFIG_FILE_NAME),
+    };
 
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent)?;
@@ -80,4 +105,66 @@ pub fn save_config(
     std::fs::write(&target, contents)?;
 
     Ok(target)
+}
+
+/// Save config to a specific directory path.
+///
+/// This function is **test-safe**: it does _not_ rely on the `HOME`
+/// environment variable and will never write to the user's real config
+/// directory. Tests should prefer this function over `save_config()`
+/// with the default config path.
+///
+/// # Arguments
+///
+/// * `config` — The configuration to save.
+/// * `last_config_path` — Previously loaded config path, if any.
+/// * `dir` — The base directory that will hold the config file.
+#[allow(dead_code)]
+pub fn save_config_to_dir(
+    config: &SavedConfig,
+    last_config_path: Option<&Path>,
+    dir: &Path,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    save_config(config, last_config_path, dir)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn test_load_config_from_dir() {
+        let temp_dir = std::env::temp_dir().join("weatherman_config_test");
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).expect("create temp dir");
+
+        let config_dir = temp_dir.join(".config").join("weatherman");
+        fs::create_dir_all(&config_dir).expect("create config dir");
+        let config_file = config_dir.join(CONFIG_FILE_NAME);
+        let toml = "name = \"Test\"\nrefresh_interval = 3600\n";
+        fs::write(&config_file, toml).expect("write config");
+
+        let (config, path) = load_config_from_dir(&config_dir)
+            .expect("load config from test dir");
+        assert_eq!(config.name, "Test");
+        assert_eq!(path, config_file);
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn test_load_config_from_dir_returns_none() {
+        let temp_dir = std::env::temp_dir().join("weatherman_config_none_test");
+        let _ = fs::remove_dir_all(&temp_dir);
+        fs::create_dir_all(&temp_dir).expect("create temp dir");
+
+        let config_dir = temp_dir.join(".config").join("weatherman");
+        fs::create_dir_all(&config_dir).expect("create config dir");
+
+        let result = load_config_from_dir(&config_dir);
+        assert!(result.is_none());
+
+        let _ = fs::remove_dir_all(&temp_dir);
+    }
 }

@@ -28,6 +28,28 @@ use chrono_tz::Tz;
 
 const TICK_RATE: u64 = 1000; // ms — each tick = 1 real second
 
+/// Attempt an API task with retries. Returns the first successful result or the last error.
+async fn with_retries<F, Fut, T, E>(max_attempts: u32, task_factory: F) -> Result<T, E>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = Result<T, E>>,
+{
+    let mut last_err = None;
+    for attempt in 1..=max_attempts {
+        match task_factory().await {
+            Ok(val) => return Ok(val),
+            Err(e) => {
+                if attempt < max_attempts {
+                    let delay = std::time::Duration::from_millis(500 * attempt as u64);
+                    tokio::time::sleep(delay).await;
+                }
+                last_err = Some(e);
+            }
+        }
+    }
+    Err(last_err.expect("at least one attempt was made"))
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     enable_raw_mode()?;
@@ -60,7 +82,13 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Resul
             if let Some(loc) = results.first() {
                 app.location = Some(loc.clone());
                 app.state = AppState::LoadingWeather;
+            } else {
+                app.error_message = Some(format!("Location '{}' not found", name));
+                app.error_modal_visible = true;
             }
+        } else {
+            app.error_message = Some(format!("Failed to search for location: {}", name));
+            app.error_modal_visible = true;
         }
     }
 
@@ -105,7 +133,7 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Resul
                     let query = app.search_query.clone();
                     // Keep state as LoadingSearch so status bar shows "Searching..."
                     // Keep search_query visible so modal shows typed text
-                    match api::geocoding::search(&query).await {
+                    match with_retries(3, || async { api::geocoding::search(&query).await }).await {
                         Ok(results) => {
                             app.search_results = results;
                             app.search_modal_active = true;
@@ -129,7 +157,7 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Resul
                 if let Some(loc) = app.location.clone() {
                     let lat = loc.latitude;
                     let lon = loc.longitude;
-                    match api::weather::fetch(lat, lon).await {
+                    match with_retries(3, || async { api::weather::fetch(lat, lon).await }).await {
                         Ok((current, hourly, daily)) => {
                             app.location = Some(loc);
                             app.current = Some(current);
@@ -154,7 +182,8 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Resul
             name: loc.name.clone(),
             refresh_interval: Some(app.auto_refresh_interval.as_secs()),
         };
-        if let Err(e) = config::save_config(&config, app.last_config_path.as_deref()) {
+        let base_dir = config::config_path();
+        if let Err(e) = config::save_config(&config, app.last_config_path.as_deref(), &base_dir) {
             eprintln!("Failed to save config: {e}");
         }
     }
@@ -534,7 +563,7 @@ fn render_search_modal(app: &App, area: Rect, frame: &mut ratatui::Frame) {
         }
         content_lines.push(Line::from(Span::styled(" ", bg)));
         content_lines.push(Line::from(Span::styled(
-            " Enter/select · Esc=close ",
+            " Enter=select · Up/down=nav · Esc=close ",
             Style::default().fg(Color::DarkGray).bg(Color::DarkGray),
         )));
     } else {
@@ -544,11 +573,11 @@ fn render_search_modal(app: &App, area: Rect, frame: &mut ratatui::Frame) {
         )));
         content_lines.push(Line::from(Span::styled(" ", bg)));
         content_lines.push(Line::from(Span::styled(
-            " Type a location, then Enter to search ",
+            " Type a location name, then press Enter to search ",
             Style::default().fg(Color::DarkGray).bg(Color::DarkGray),
         )));
         content_lines.push(Line::from(Span::styled(
-            " Enter=search · Esc=close ",
+            " Ctrl+U=clear · Esc=close ",
             Style::default().fg(Color::DarkGray).bg(Color::DarkGray),
         )));
     }

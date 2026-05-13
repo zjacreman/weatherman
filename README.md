@@ -83,6 +83,7 @@ The app consumes the [Open-Meteo API](https://open-meteo.com/) — a free, no-au
 All response fields are self-describing in the JSON (see the API docs for full field lists).
 
 - **Note**: `is_day` is returned as an `f64` (0.0 or 1.0), not a boolean
+- **Retry logic**: Failed API calls are automatically retried up to 3 times with exponential backoff (500ms, 1000ms, 1500ms delays).
 
 ### Data Flow
 
@@ -109,7 +110,7 @@ Key press → Message enum → App::update() → internal state change
 | Code | Condition | Icon (day) | Icon (night) | Color |
 |------|-----------|------------|--------------|-------|
 | 0 | Clear Sky | ☀️ | 🌙 | Yellow |
-| 1 | Mainly Clear | — | — | Light Yellow |
+| 1 | Mainly Clear | 🌤️ (day) / 🌙 (night) | — | Light Yellow |
 | 2 | Partly Cloudy | ⛅ | — | Light Blue |
 | 3 | Overcast | ☁️ | — | Light Blue |
 | 45, 48 | Fog | 🌫️ | — | Gray |
@@ -128,32 +129,32 @@ Key press → Message enum → App::update() → internal state change
 weatherman/
 ├── Cargo.toml
 ├── src/
-│   ├── main.rs          # Entry-point + key handling + rendering
-│   ├── lib.rs           # Library root — re-exports domain types
-│   ├── app.rs           # Core domain: App, Message, AppState, TempUnit, WmoWeather, data models
+│   ├── main.rs              # Entry-point + key handling + rendering
+│   ├── lib.rs               # Library root — re-exports domain and API types
+│   ├── app.rs               # Core domain: App, Message, AppState, TempUnit, WmoWeather, data models
+│   ├── config.rs            # Persisted location loading/saving (test-safe dir override)
 │   ├── api/
-│   │   ├── mod.rs       # Module layout
-│   │   ├── client.rs    # reqwest HTTP client + URL builders
-│   │   ├── geocoding.rs # Open-Meteo geocoding search
-│   │   └── weather.rs   # Open-Meteo forecast fetch + deserialization
+│   │   ├── mod.rs           # Module layout
+│   │   ├── client.rs        # reqwest HTTP client, URL builders, query encoding
+│   │   ├── geocoding.rs     # Open-Meteo geocoding search + GeocodingResult
+│   │   └── weather.rs       # Open-Meteo forecast fetch + deserialization + TestWeatherResponse
 │   └── ui/
-│       ├── mod.rs       # Module layout
-│       ├── helpers.rs   # format_temp, format_wind_deg, progress_bar
-│       ├── layout.rs    # Layout constraints
-│       └── widgets/     # Ratatui widget components
+│       ├── mod.rs           # Sub-module re-exports
+│       ├── helpers.rs       # format_temp, format_wind_deg, progress_bar
+│       └── widgets/         # Ratatui widget components
+│           ├── mod.rs
 │           ├── current.rs
-│           ├── daily.rs
-│           ├── modal.rs
-│           └── status_bar.rs
-│   ├── config.rs  # Persisted location loading/saving
+│           └── error_modal.rs
 ├── tests/
-│   └── unit_tests.rs    # Integration tests for WMO codes, models, conversion
+│   └── unit_tests.rs       # Integration tests for WMO codes, models, conversion, API client
+└── README.md
 ```
 
 ### Key Modules
 
 - **`app.rs`** — The heart of the app. Contains the Elm-architecture `update` method, data models (`Location`, `CurrentWeather`, `HourlyForecast`, `DailyForecast`), the `WmoWeather` enum with icon/color/description, and the `TempUnit` enum.
-- **`api/`** — Thin wrappers over Open-Meteo endpoints. Handles URL building, HTTP requests, and `serde` deserialization.
+- **`api/`** — Thin wrappers over Open-Meteo endpoints. Handles URL building, HTTP requests, and `serde` deserialization. `weather.rs` also provides `TestWeatherResponse` (a non-Option variant) and `From` impls for test deserialization and conversion. All API types have a single source of truth — no duplicate structs.
+- **`config.rs`** — Configuration persistence with test-safe directory override via `load_config_from_dir()` and `save_config_to_dir()` to avoid the user's real config during tests.
 - **`ui/`** — Ratatui widget components and layout helpers.
 
 ### Temperature & Wind Speed Conversion
@@ -214,6 +215,15 @@ cargo clippy
 - **Added: Persistent location across sessions** — App now saves the current location to `~/.config/weatherman/weatherman.toml` (or `./weatherman.toml`) on exit and auto-loads it on startup. Writes to the same path that was read at startup; defaults to config dir if neither existed.
 - **Added: Config module** (`src/config.rs`) with `load_config()` and `save_config()` functions using the `toml` crate.
 - **Added: Auto-load weather on startup** — If a saved location exists, the app searches for it and fetches weather automatically before entering the event loop.
+
+#### v0.2.0 — Sprint 2: Architecture Cleanup & Test Coverage
+- **Arch: Unified deserialization types** — Removed duplicate `weather_api` module from `lib.rs`. `WeatherResponse`, `CurrentData`, `HourlyData`, `DailyData`, and `GeocodingResult` are now defined once in the `api/` crate and re-exported. The `GeocodingResult::from()` impl lives alongside the struct in `api/geocoding.rs`. Tests use `api/` types via crate root re-exports.
+- **Arch: Removed dead `search_focused` field** — The `search_focused` field was written in 4 places but never read. Removed the field from the `App` struct, its initialization, and all assignments.
+- **Fix: Startup geocoding failure now surfaces an error** — Previously a failed geocoding search on startup silently produced a blank screen. Now the error modal displays "Location 'X' not found" or "Failed to search for location: X" to inform the user.
+- **Test: Safe config directory tests** — Fixed config persistence tests that used `std::env::set_var("HOME", ...)` which could overwrite the user's real config. All config tests now use temp directories with `load_config_from_dir()` / `save_config_to_dir()`.
+- **Test: New `api/client.rs` tests** — 6 tests for `encode_query()`, `geocoding_url()`, and `forecast_url()` covering ASCII passthrough, space encoding, unicode encoding, and full URL format verification.
+- **Test: New `App::update` state machine tests** — 7 tests for `SearchClear`, `SearchInput`, `WeatherFetched`, `SearchError`, `WeatherError`, `ToggleUnit`, and `show_error()` transitions.
+- **UX: Improved search modal instructions** — No-results state shows "Type a location name, then press Enter to search" and "Ctrl+U=clear · Esc=close". With-results state shows "Enter=select · Up/down=nav · Esc=close" for clarity.
 
 #### v0.1.5 — Tab System Simplification
 - **Fix: Simplified tab system** — Removed the broken 3-tab system (which caused phantom 'Index' state when pressing 3). Now uses exactly 2 tabs: **Daily** (default, shown on launch) and **Hourly** (toggle via `Tab` key). Removed number key shortcuts `1/2/3` and `h`/`l` — only `Tab` cycles tabs.

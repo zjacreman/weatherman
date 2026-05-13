@@ -67,24 +67,21 @@ weatherman/
 ├── rust-toolchain.toml
 ├── src/
 │   ├── main.rs              # Binary entry, event loop, key handling, drawing
-│   ├── lib.rs                # Library root — re-exports domain types
+│   ├── lib.rs                # Library root — re-exports domain and API types
 │   ├── app.rs               # Core domain: App, Message, WmoWeather, models
-│   ├── config.rs            # Persisted location loading/saving
+│   ├── config.rs            # Persisted location loading/saving (test-safe dir override)
 │   ├── api/
 │   │   ├── mod.rs           # Module re-exports
-│   │   ├── client.rs        # reqwest HTTP client + URL builders
+│   │   ├── client.rs        # reqwest HTTP client + URL builders + query encoding
 │   │   ├── geocoding.rs     # Open-Meteo geocoding search
-│   │   └── weather.rs       # Open-Meteo forecast fetch
+│   │   └── weather.rs       # Open-Meteo forecast fetch + deserialization
 │   └── ui/
 │       ├── mod.rs           # Sub-module re-exports
 │       ├── helpers.rs       # format_temp, format_wind_deg, progress_bar
-│       ├── layout.rs        # Layout constraints (unused in production)
 │       └── widgets/         # Ratatui widget components
 │           ├── mod.rs
 │           ├── current.rs
-│           ├── daily.rs
-│           ├── modal.rs
-│           └── status_bar.rs
+│           └── error_modal.rs
 ├── tests/
 │   └── unit_tests.rs        # Integration tests for domain logic
 └── README.md
@@ -126,7 +123,7 @@ GET https://api.open-meteo.com/v1/forecast?latitude=<lat>&longitude=<lon>&curren
 
 **Current fields**: `temperature_2m`, `relative_humidity_2m`, `apparent_temperature`, `precipitation`, `weather_code`, `wind_speed_10m`, `wind_direction_10m`, `wind_gusts_10m`, `is_day`
 
-**Hourly fields**: `temperature_2m`, `relative_humidity_2m`, `apparent_temperature`, `weather_code`, `precipitation`, `wind_speed_10m`
+**Hourly fields**: `temperature_2m`, `relative_humidity_2m`, `apparent_temperature`, `weather_code`, `precipitation`, `wind_speed_10m`, `is_day`
 
 **Daily fields**: `weather_code`, `temperature_2m_max`, `temperature_2m_min`, `sunrise`, `sunset`, `precipitation_sum`, `wind_speed_10m_max`
 
@@ -237,8 +234,12 @@ The `last_update` field stores time as `HH:MM:SS` in the system's local timezone
 ### Adding a New API Field
 
 1. Add the field to the `#[derive(Deserialize)]` struct in `api/weather.rs` or `api/geocoding.rs`.
-2. Map it to the domain model in `From<...>` impls inside `app.rs`.
-3. Pass through to the widget/display layer as needed.
+2. Update the domain model in `app.rs` (e.g., `CurrentWeather`, `HourlyForecast`) as needed.
+3. If the field is added to a fetch struct (with `Option<>`), update `into_models()` in the same file.
+4. Add the field to the corresponding `TestXXX` struct (non-Option variant) in `api/weather.rs` if exposed for tests.
+5. Update the `From<TestXXX>` impl if converting between types.
+6. Update `lib.rs` re-exports in the `weather_api` comment if a new type is exposed.
+7. Pass through to the widget/display layer as needed.
 
 ### Status Bar / Footer
 
@@ -267,7 +268,11 @@ All tests are in `tests/unit_tests.rs`. They exercise:
 - **WMO weather codes** — tests for all WMO code variants including main clear, rime fog, freezing rain, snow grains, rain/snow showers, freezing drizzle.
 - **Tab system** — 2-tab toggle (Daily/Hourly), default tab verification
 - **Config persistence** — tests for `load_config()` (config dir then cwd fallback) and `save_config()` (uses last path or defaults to config dir)
-- **Config refresh_interval** — tests for `SavedConfig` serialization/deserialization with and without `refresh_interval`, and default value verification
+- **Config persistence (live)** — 3 tests for save/load roundtrip, parent directory creation, and None-on-missing-file
+- **Config refresh_interval** - tests for `SavedConfig` serialization/deserialization with and without `refresh_interval`, and default value verification
+- **api/client.rs** - 6 tests for `encode_query()` (ASCII passthrough, space encoding, unicode encoding), `geocoding_url()` (format + encoding), and `forecast_url()` (format verification with required params)
+- **App::update** - 7 tests for `SearchClear`, `SearchInput`, `WeatherFetched`, `SearchError`, `WeatherError`, `ToggleUnit`, and `show_error()` state transitions
+- **Config persistence (safe)** - tests use `load_config_from_dir()` / `save_config_to_dir()` with temp directories instead of `HOME` env var manipulation
 
 ### Adding New Tests
 

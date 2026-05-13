@@ -165,14 +165,17 @@ impl WmoWeather {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Location {
+    #[allow(dead_code)]
     pub id: u64,
     pub name: String,
     pub admin1: Option<String>,
     pub country: String,
+    #[allow(dead_code)]
     pub country_code: String,
     pub latitude: f64,
     pub longitude: f64,
     pub timezone: String,
+    #[allow(dead_code)]
     pub population: Option<u64>,
 }
 
@@ -259,14 +262,19 @@ pub use crossterm::event::KeyEvent;
 #[derive(Debug, Clone)]
 pub enum Message {
     Tick,
+    #[allow(dead_code)]
     SearchInput(String),
+    #[allow(dead_code)]
     SearchSubmit,
     SearchClear,
+    #[allow(dead_code)]
     SearchResultsReceived(Vec<Location>),
+    #[allow(dead_code)]
     SearchError(String),
     WeatherFetched,
     WeatherError(String),
     ToggleUnit,
+    #[allow(dead_code)]
     Key(KeyEvent),
     SearchModal { active: bool },
 }
@@ -282,7 +290,6 @@ pub struct App {
     pub search_query: String,
     pub search_results: Vec<Location>,
     pub search_modal_active: bool,
-    pub search_focused: bool,
     pub search_selected_idx: u16,
     pub error_message: Option<String>,
     pub error_modal_visible: bool,
@@ -313,7 +320,6 @@ impl App {
             search_query: String::new(),
             search_results: Vec::new(),
             search_modal_active: false,
-            search_focused: false,
             search_selected_idx: 0,
             error_message: None,
             error_modal_visible: false,
@@ -341,6 +347,7 @@ impl App {
         self.is_quit
     }
 
+    #[allow(dead_code)]
     pub fn convert_temp(&self, temp_c: f32) -> f32 {
         match self.temperature_unit {
             TempUnit::Celsius => temp_c,
@@ -374,6 +381,7 @@ impl App {
         crate::ui::helpers::progress_bar(current, max, width)
     }
 
+    #[allow(dead_code)]
     pub fn show_error(&mut self, msg: String) {
         self.error_message = Some(msg);
         self.error_modal_visible = true;
@@ -390,7 +398,6 @@ impl App {
                 self.search_query.clear();
                 self.search_results.clear();
                 self.search_modal_active = false;
-                self.search_focused = false;
                 self.search_selected_idx = 0;
                 self.state = AppState::Idle;
             }
@@ -430,18 +437,17 @@ impl App {
             }
             Message::SearchModal { active: true } => {
                 self.search_modal_active = true;
-                self.search_focused = true;
                 self.search_selected_idx = 0;
             }
             Message::SearchModal { active: false } => {
                 self.search_modal_active = false;
-                self.search_focused = false;
                 self.search_selected_idx = 0;
             }
             Message::Key(_) => {}
         }
     }
 
+    #[allow(dead_code)]
     pub fn weather_display(&self) -> Option<(String, String)> {
         self.current.as_ref().map(|current| {
             let wmo = WmoWeather::from(current.weather_code);
