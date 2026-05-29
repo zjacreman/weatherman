@@ -42,3 +42,16 @@ pub fn progress_bar(current: u16, max: u16, width: u16) -> String {
     let empty = width - filled;
     format!("{}{}", "█".repeat(filled as usize), "░".repeat(empty as usize))
 }
+
+/// Compute pressure trend from current and 3-hours-ago values.
+/// Returns (trend_label, arrow_char).
+pub fn format_pressure_trend(current: f32, three_hours_ago: f32) -> (&'static str, &'static str) {
+    let diff = current - three_hours_ago;
+    if diff > 1.0 {
+        ("Rising", "↑")
+    } else if diff < -1.0 {
+        ("Falling", "↓")
+    } else {
+        ("Steady", "→")
+    }
+}

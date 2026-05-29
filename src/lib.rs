@@ -21,7 +21,7 @@ pub use config::SavedConfig;
 pub use ratatui::style::Color;
 
 // Re-export ui helpers for testing
-pub use ui::helpers::{format_wind_full, progress_bar};
+pub use ui::helpers::{format_wind_full, progress_bar, format_pressure_trend};
 
 // Re-export CurrentWidget so crate consumers can use it
 pub use ui::CurrentWidget;

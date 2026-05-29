@@ -815,6 +815,31 @@ fn last_update_format_is_local_hhmmss() {
 }
 
 // ────────────────────────────────────────────────────
+// Pressure trend tests
+// ────────────────────────────────────────────────────
+
+#[test]
+fn pressure_trend_rising() {
+    let (label, arrow) = weatherman::format_pressure_trend(1015.0, 1012.0);
+    assert_eq!(label, "Rising");
+    assert_eq!(arrow, "↑");
+}
+
+#[test]
+fn pressure_trend_falling() {
+    let (label, arrow) = weatherman::format_pressure_trend(1010.0, 1014.0);
+    assert_eq!(label, "Falling");
+    assert_eq!(arrow, "↓");
+}
+
+#[test]
+fn pressure_trend_steady() {
+    let (label, arrow) = weatherman::format_pressure_trend(1013.0, 1013.5);
+    assert_eq!(label, "Steady");
+    assert_eq!(arrow, "→");
+}
+
+// ────────────────────────────────────────────────────
 // Auto-refresh timer logic
 // ────────────────────────────────────────────────────
 
