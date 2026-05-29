@@ -87,6 +87,10 @@ pub struct TestCurrentData {
     pub wind_direction_10m: u16,
     pub wind_gusts_10m: f32,
     pub is_day: f64,
+    pub pressure_msl: Option<f32>,
+    pub uv_index: Option<f32>,
+    pub visibility: Option<f32>,
+    pub dewpoint_temperature: Option<f32>,
 }
 
 #[allow(dead_code)]
@@ -101,6 +105,7 @@ pub struct TestHourlyData {
     pub precipitation: Vec<f32>,
     pub wind_speed_10m: Vec<f32>,
     pub is_day: Vec<f64>,
+    pub pressure_msl: Option<Vec<f32>>,
 }
 
 #[allow(dead_code)]
