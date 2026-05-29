@@ -219,6 +219,7 @@ fn draw(area: Rect, app: &App, frame: &mut ratatui::Frame) {
                         .fg(Color::White)
                         .add_modifier(Modifier::BOLD),
                 ),
+                Span::raw("  "),
             ]
         } else {
             vec![Span::raw(" Weather TUI — Press S to search ")]
@@ -234,9 +235,9 @@ fn draw(area: Rect, app: &App, frame: &mut ratatui::Frame) {
 
     // ── STATUS BAR ──
     let status_text = if app.state == AppState::LoadingSearch {
-        " Searching...".into()
+        " Searching... ".into()
     } else if app.state == AppState::LoadingWeather || app.state == AppState::Refreshing {
-        " Loading weather...".into()
+        " Loading weather... ".into()
     } else if app.search_modal_active {
         format!(" Search: {} ", app.search_query)
     } else if app.last_update.is_some() {
@@ -259,7 +260,7 @@ fn draw(area: Rect, app: &App, frame: &mut ratatui::Frame) {
             _ => "?",
         };
         format!(
-            " Last: {} | {} | Ref: {} | Tab=cycles | S=search U=unit R=refresh Esc=clear Q=quit",
+            " Last: {} | {} | Ref: {} | Tab=cycles | S=search U=unit R=refresh Esc=clear Q=quit ",
             &last_time, tab_display, refresh_display
         )
     } else {

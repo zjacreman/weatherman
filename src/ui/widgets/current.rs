@@ -2,6 +2,49 @@ use crate::app::{App, WmoWeather};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Paragraph};
 
+/// Simple greedy word-wrap: breaks `text` into lines of at most `width` display columns,
+/// never splitting a word in the middle.
+fn wrap_text(text: &str, width: u16) -> Vec<String> {
+    let width = width as usize;
+    if width == 0 {
+        return vec![text.to_string()];
+    }
+    let mut lines = Vec::new();
+    let mut current_line = String::new();
+    for word in text.split_whitespace() {
+        let extra = if current_line.is_empty() { 0 } else { 1 };
+        if current_line.len() + extra + word.len() > width {
+            if !current_line.is_empty() {
+                lines.push(std::mem::take(&mut current_line));
+            }
+            if word.len() > width {
+                // Word itself exceeds width; split it (rare for normal location names)
+                let mut remaining = word;
+                while remaining.len() > width {
+                    let (chunk, rest) = remaining.split_at(width);
+                    lines.push(chunk.to_string());
+                    remaining = rest;
+                }
+                current_line = remaining.to_string();
+            } else {
+                current_line = word.to_string();
+            }
+        } else {
+            if !current_line.is_empty() {
+                current_line.push(' ');
+            }
+            current_line.push_str(word);
+        }
+    }
+    if !current_line.is_empty() {
+        lines.push(current_line);
+    }
+    if lines.is_empty() {
+        lines.push(text.to_string());
+    }
+    lines
+}
+
 fn uv_color(uv: f32) -> Color {
     if uv <= 2.0 {
         Color::Rgb(76, 175, 80)       // green — low
@@ -76,14 +119,17 @@ impl Widget for CurrentWidget<'_> {
             content_area.width.saturating_sub(12),
         );
 
-        let mut lines: Vec<Line> = vec![
-            // Location name (prominent)
-            Line::from(vec![Span::styled(
-                location.display_name().to_string(),
+        let mut lines: Vec<Line> = vec![];
+        // Location name (prominent), wrapped cleanly on word boundaries
+        for wrapped in wrap_text(&location.display_name(), content_area.width) {
+            lines.push(Line::from(vec![Span::styled(
+                wrapped,
                 Style::default()
                     .fg(Color::White)
                     .add_modifier(Modifier::BOLD),
-            )]),
+            )]));
+        }
+        lines.extend(vec![
             // Weather icon and condition
             Line::from(vec![
                 Span::styled(wmo.icon(current.is_day), Style::default().fg(wmo.color())),
@@ -141,7 +187,7 @@ impl Widget for CurrentWidget<'_> {
                 Span::raw("  "),
                 Span::styled(gusts, Style::default().fg(Color::Yellow)),
             ]),
-        ];
+        ]);
 
         // Conditionally add precipitation line
         if let Some(line) = precip_line {
