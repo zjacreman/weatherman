@@ -417,6 +417,8 @@ impl App {
             Message::WeatherFetched => {
                 self.state = AppState::Idle;
                 self.last_update = Some(chrono::Local::now().format("%H:%M:%S").to_string());
+                self.error_message = None;
+                self.error_modal_visible = false;
             }
             Message::WeatherError(e) => {
                 self.state = AppState::Idle;
