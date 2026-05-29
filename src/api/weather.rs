@@ -27,6 +27,10 @@ struct FetchCurrentData {
     pub wind_direction_10m: u16,
     pub wind_gusts_10m: f32,
     pub is_day: f64,
+    pub pressure_msl: Option<f32>,
+    pub uv_index: Option<f32>,
+    pub visibility: Option<f32>,
+    pub dewpoint_temperature: Option<f32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -38,6 +42,7 @@ struct FetchHourlyData {
     pub precipitation: Vec<f32>,
     pub wind_speed_10m: Vec<f32>,
     pub is_day: Vec<f64>,
+    pub pressure_msl: Option<Vec<f32>>,
 }
 
 #[derive(Debug, Deserialize)]
