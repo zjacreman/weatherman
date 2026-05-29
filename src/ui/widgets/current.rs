@@ -150,7 +150,7 @@ impl Widget for CurrentWidget<'_> {
 
         // Pressure with trend
         if let Some(pressure) = current.pressure {
-            let trend = if let Some(ref pressures) = hourly_pressures {
+            let trend = if let Some(pressures) = hourly_pressures {
                 if pressures.len() >= 4 {
                     let prev = pressures[pressures.len() - 4];
                     crate::ui::helpers::format_pressure_trend(pressure, prev)
