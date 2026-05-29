@@ -201,6 +201,10 @@ pub struct CurrentWeather {
     pub precipitation: f32,
     pub weather_code: u8,
     pub is_day: bool,
+    pub pressure: Option<f32>,
+    pub uv_index: Option<f32>,
+    pub visibility: Option<f32>,
+    pub dewpoint: Option<f32>,
 }
 
 #[derive(Debug, Clone)]
@@ -212,6 +216,7 @@ pub struct HourlyForecast {
     pub precipitations: Vec<f32>,
     pub wind_speeds: Vec<f32>,
     pub is_day: Vec<bool>,
+    pub pressures: Option<Vec<f32>>,
 }
 
 #[derive(Debug, Clone)]
