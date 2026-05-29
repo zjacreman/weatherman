@@ -2,6 +2,30 @@ use crate::app::{App, WmoWeather};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Paragraph};
 
+fn uv_color(uv: f32) -> Color {
+    if uv <= 2.0 {
+        Color::Rgb(76, 175, 80)       // green — low
+    } else if uv <= 5.0 {
+        Color::Rgb(255, 235, 59)      // yellow — moderate
+    } else if uv <= 7.0 {
+        Color::Rgb(255, 152, 0)       // orange — high
+    } else if uv <= 10.0 {
+        Color::Rgb(244, 67, 54)       // red — very high
+    } else {
+        Color::Rgb(156, 39, 176)      // purple — extreme
+    }
+}
+
+fn visibility_color(vis_m: f32) -> Color {
+    if vis_m >= 10000.0 {
+        Color::Rgb(76, 175, 80)       // green — excellent
+    } else if vis_m >= 5000.0 {
+        Color::Rgb(255, 235, 59)      // yellow — moderate
+    } else {
+        Color::Rgb(244, 67, 54)       // red — poor
+    }
+}
+
 pub struct CurrentWidget<'a> {
     pub app: &'a App,
 }
@@ -24,6 +48,7 @@ impl Widget for CurrentWidget<'_> {
 
         let current = self.app.current.as_ref().unwrap();
         let location = self.app.location.as_ref().unwrap();
+        let hourly_pressures = self.app.hourly.as_ref().and_then(|h| h.pressures.as_ref());
         let wmo = WmoWeather::from(current.weather_code);
 
         let temp = self.app.format_temp(current.temperature);
@@ -121,6 +146,77 @@ impl Widget for CurrentWidget<'_> {
         // Conditionally add precipitation line
         if let Some(line) = precip_line {
             lines.push(line);
+        }
+
+        // Pressure with trend
+        if let Some(pressure) = current.pressure {
+            let trend = if let Some(ref pressures) = hourly_pressures {
+                if pressures.len() >= 4 {
+                    let prev = pressures[pressures.len() - 4];
+                    crate::ui::helpers::format_pressure_trend(pressure, prev)
+                } else {
+                    ("—", "")
+                }
+            } else {
+                ("—", "")
+            };
+            lines.push(Line::from(vec![
+                Span::styled("Pressure:", Style::default().fg(Color::Gray)),
+                Span::raw("  "),
+                Span::styled(
+                    format!("{:.0} hPa", pressure),
+                    Style::default().fg(Color::White),
+                ),
+                Span::raw("  "),
+                Span::styled(
+                    format!("{} {}", trend.1, trend.0),
+                    Style::default().fg(if trend.0 == "Rising" {
+                        Color::Rgb(76, 175, 80)
+                    } else if trend.0 == "Falling" {
+                        Color::Rgb(244, 67, 54)
+                    } else {
+                        Color::Gray
+                    }),
+                ),
+            ]));
+        }
+
+        // UV Index
+        if let Some(uv) = current.uv_index {
+            lines.push(Line::from(vec![
+                Span::styled("UV Index:", Style::default().fg(Color::Gray)),
+                Span::raw("  "),
+                Span::styled(
+                    format!("{:.1}", uv),
+                    Style::default().fg(uv_color(uv)),
+                ),
+            ]));
+        }
+
+        // Visibility
+        if let Some(vis) = current.visibility {
+            let vis_display = if vis >= 1000.0 {
+                format!("{:.1} km", vis / 1000.0)
+            } else {
+                format!("{:.0} m", vis)
+            };
+            lines.push(Line::from(vec![
+                Span::styled("Visibility:", Style::default().fg(Color::Gray)),
+                Span::raw("  "),
+                Span::styled(vis_display, Style::default().fg(visibility_color(vis))),
+            ]));
+        }
+
+        // Dew Point
+        if let Some(dew) = current.dewpoint {
+            lines.push(Line::from(vec![
+                Span::styled("Dew Point:", Style::default().fg(Color::Gray)),
+                Span::raw("  "),
+                Span::styled(
+                    self.app.format_temp(dew),
+                    Style::default().fg(Color::Cyan),
+                ),
+            ]));
         }
 
         Paragraph::new(lines).render(content_area, buf);
