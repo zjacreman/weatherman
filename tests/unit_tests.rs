@@ -319,7 +319,11 @@ fn deserialize_weather_response() {
         "wind_speed_10m": 15.3,
         "wind_direction_10m": 240,
         "wind_gusts_10m": 25.4,
-        "is_day": 1.0
+        "is_day": 1.0,
+        "pressure_msl": 1013.2,
+        "uv_index": 5.2,
+        "visibility": 15000.0,
+        "dewpoint_temperature": 12.1
       },
       "hourly": {
         "time": ["2026-05-10T12:00", "2026-05-10T13:00", "2026-05-10T14:00", "2026-05-10T15:00"],
@@ -328,7 +332,8 @@ fn deserialize_weather_response() {
         "weather_code": [2, 2, 2, 1],
         "precipitation": [0.0, 0.0, 0.0, 0.0],
         "wind_speed_10m": [14.0, 15.3, 16.1, 17.2],
-        "is_day": [1.0, 1.0, 1.0, 1.0]
+        "is_day": [1.0, 1.0, 1.0, 1.0],
+        "pressure_msl": [1012.5, 1013.0, 1013.2, 1013.5]
       },
       "daily": {
         "time": ["2026-05-10", "2026-05-11"],
@@ -370,6 +375,10 @@ fn deserialize_weather_response() {
     assert_eq!(current.wind_direction, 240);
     assert!((current.wind_gusts - 25.4).abs() < 1e-3);
     assert!(current.is_day);
+    assert!((current.pressure.unwrap() - 1013.2).abs() < 1e-3);
+    assert!((current.uv_index.unwrap() - 5.2).abs() < 1e-3);
+    assert!((current.visibility.unwrap() - 15000.0).abs() < 1e-3);
+    assert!((current.dewpoint.unwrap() - 12.1).abs() < 1e-3);
 
     // === Hourly ===
     assert_eq!(
@@ -392,6 +401,9 @@ fn deserialize_weather_response() {
     assert!((hourly.wind_speeds[1] - 15.3).abs() < 1e-3);
     assert!((hourly.wind_speeds[2] - 16.1).abs() < 1e-3);
     assert!((hourly.wind_speeds[3] - 17.2).abs() < 1e-3);
+    let pressures = hourly.pressures.as_ref().unwrap();
+    assert_eq!(pressures.len(), 4);
+    assert!((pressures[0] - 1012.5).abs() < 1e-3);
 
     // === Daily ===
     assert_eq!(daily.dates, ["2026-05-10", "2026-05-11"]);
@@ -420,7 +432,11 @@ fn deserialize_weather_response_is_day_as_number() {
         "wind_speed_10m": 8.5,
         "wind_direction_10m": 180,
         "wind_gusts_10m": 12.0,
-        "is_day": 0.0
+        "is_day": 0.0,
+        "pressure_msl": null,
+        "uv_index": null,
+        "visibility": null,
+        "dewpoint_temperature": null
       },
       "hourly": {
         "time": ["2026-05-10T02:00", "2026-05-10T03:00"],
@@ -429,7 +445,8 @@ fn deserialize_weather_response_is_day_as_number() {
         "weather_code": [0, 1],
         "precipitation": [0.0, 0.0],
         "wind_speed_10m": [8.5, 9.0],
-        "is_day": [0.0, 0.0]
+        "is_day": [0.0, 0.0],
+        "pressure_msl": null
       },
       "daily": {
         "time": ["2026-05-10"],
@@ -467,7 +484,11 @@ fn deserialize_runtime_weather_response_with_options() {
         "wind_speed_10m": 15.3,
         "wind_direction_10m": 240,
         "wind_gusts_10m": 25.4,
-        "is_day": 1.0
+        "is_day": 1.0,
+        "pressure_msl": 1015.0,
+        "uv_index": 3.0,
+        "visibility": 20000.0,
+        "dewpoint_temperature": 10.5
       },
       "hourly": {
         "time": ["2026-05-10T14:00"],
@@ -476,7 +497,8 @@ fn deserialize_runtime_weather_response_with_options() {
         "weather_code": [2],
         "precipitation": [0.0],
         "wind_speed_10m": [15.3],
-        "is_day": [1.0]
+        "is_day": [1.0],
+        "pressure_msl": [1015.0]
       },
       "daily": {
         "time": ["2026-05-10"],
