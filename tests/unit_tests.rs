@@ -1134,6 +1134,10 @@ fn forecast_url_contains_required_params() {
     assert!(url.contains("temperature_unit=celsius"));
     assert!(url.contains("timezone=auto"));
     assert!(url.contains("current=temperature_2m"));
+    assert!(url.contains("pressure_msl"));
+    assert!(url.contains("uv_index"));
+    assert!(url.contains("visibility"));
+    assert!(url.contains("dewpoint_temperature"));
     assert!(url.contains("hourly=temperature_2m"));
     assert!(url.contains("daily=weather_code"));
 }
