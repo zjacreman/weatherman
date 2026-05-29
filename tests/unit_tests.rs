@@ -466,8 +466,15 @@ fn deserialize_weather_response_is_day_as_number() {
     assert!((response.current.is_day - 0.0).abs() < f64::EPSILON);
 
     // Convert to domain models and verify is_day becomes false
-    let (current, _hourly, _daily) = response.into();
+    let (current, hourly, _daily) = response.into();
     assert!(!current.is_day);
+
+    // Verify null fields deserialize to None
+    assert!(current.pressure.is_none());
+    assert!(current.uv_index.is_none());
+    assert!(current.visibility.is_none());
+    assert!(current.dewpoint.is_none());
+    assert!(hourly.pressures.is_none());
 }
 
 #[test]
@@ -532,6 +539,16 @@ fn deserialize_runtime_weather_response_with_options() {
     assert!((c.is_day - 1.0).abs() < f64::EPSILON);
     // The boolean check: 1.0 != 0.0 → true
     assert!(c.is_day != 0.0);
+
+    // Verify new optional fields with non-null values
+    assert!(c.pressure_msl.is_some());
+    assert!((c.pressure_msl.unwrap() - 1015.0).abs() < 1e-3);
+    assert!(c.uv_index.is_some());
+    assert!((c.uv_index.unwrap() - 3.0).abs() < 1e-3);
+    assert!(c.visibility.is_some());
+    assert!((c.visibility.unwrap() - 20000.0).abs() < 1e-3);
+    assert!(c.dewpoint_temperature.is_some());
+    assert!((c.dewpoint_temperature.unwrap() - 10.5).abs() < 1e-3);
 }
 
 // ────────────────────────────────────────────────────
