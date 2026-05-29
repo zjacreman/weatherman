@@ -142,9 +142,9 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Resul
                             app.state = AppState::Idle;
                         }
                         Err(e) => {
-                            eprintln!("Geocoding error: {}", e);
                             app.error_message = Some(e.to_string());
-                            app.search_query.clear(); // Clear on error too
+                            app.error_modal_visible = true;
+                            app.search_query.clear();
                             app.state = AppState::Idle;
                         }
                     }
@@ -166,7 +166,6 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Resul
                             app.update(Message::WeatherFetched);
                         }
                         Err(e) => {
-                            eprintln!("Weather fetch error: {}", e);
                             app.update(Message::WeatherError(e.to_string()));
                         }
                     }

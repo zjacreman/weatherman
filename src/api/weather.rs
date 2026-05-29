@@ -228,14 +228,29 @@ impl From<TestWeatherResponse> for (
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct ApiError {
+    pub reason: Option<String>,
+}
+
 pub async fn fetch(lat: f64, lon: f64) -> Result<(CurrentWeather, HourlyForecast, DailyForecast)> {
     let url = client::forecast_url(lat, lon);
-    let resp: FetchWeatherResponse = client::HTTP_CLIENT
+    let resp = client::HTTP_CLIENT
         .get(&url)
         .send()
-        .await?
-        .error_for_status()?
-        .json()
         .await?;
-    extract_models(resp)
+
+    let status = resp.status();
+    if !status.is_success() {
+        let body = resp.text().await.unwrap_or_default();
+        if let Ok(api_err) = serde_json::from_str::<ApiError>(&body) {
+            if let Some(reason) = api_err.reason {
+                return Err(anyhow::anyhow!("{}", reason));
+            }
+        }
+        return Err(anyhow::anyhow!("HTTP {} — {}", status.as_u16(), body));
+    }
+
+    let parsed: FetchWeatherResponse = resp.json().await?;
+    extract_models(parsed)
 }
