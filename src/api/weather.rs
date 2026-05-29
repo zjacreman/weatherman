@@ -30,6 +30,7 @@ struct FetchCurrentData {
     pub pressure_msl: Option<f32>,
     pub uv_index: Option<f32>,
     pub visibility: Option<f32>,
+    #[serde(rename = "dew_point_2m")]
     pub dewpoint_temperature: Option<f32>,
 }
 
@@ -90,6 +91,7 @@ pub struct TestCurrentData {
     pub pressure_msl: Option<f32>,
     pub uv_index: Option<f32>,
     pub visibility: Option<f32>,
+    #[serde(rename = "dew_point_2m")]
     pub dewpoint_temperature: Option<f32>,
 }
 

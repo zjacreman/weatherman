@@ -323,7 +323,7 @@ fn deserialize_weather_response() {
         "pressure_msl": 1013.2,
         "uv_index": 5.2,
         "visibility": 15000.0,
-        "dewpoint_temperature": 12.1
+        "dew_point_2m": 12.1
       },
       "hourly": {
         "time": ["2026-05-10T12:00", "2026-05-10T13:00", "2026-05-10T14:00", "2026-05-10T15:00"],
@@ -436,7 +436,7 @@ fn deserialize_weather_response_is_day_as_number() {
         "pressure_msl": null,
         "uv_index": null,
         "visibility": null,
-        "dewpoint_temperature": null
+        "dew_point_2m": null
       },
       "hourly": {
         "time": ["2026-05-10T02:00", "2026-05-10T03:00"],
@@ -495,7 +495,7 @@ fn deserialize_runtime_weather_response_with_options() {
         "pressure_msl": 1015.0,
         "uv_index": 3.0,
         "visibility": 20000.0,
-        "dewpoint_temperature": 10.5
+        "dew_point_2m": 10.5
       },
       "hourly": {
         "time": ["2026-05-10T14:00"],
@@ -1201,7 +1201,7 @@ fn forecast_url_contains_required_params() {
     assert!(url.contains("pressure_msl"));
     assert!(url.contains("uv_index"));
     assert!(url.contains("visibility"));
-    assert!(url.contains("dewpoint_temperature"));
+    assert!(url.contains("dew_point_2m"));
     assert!(url.contains("hourly=temperature_2m"));
     assert!(url.contains("daily=weather_code"));
 }
