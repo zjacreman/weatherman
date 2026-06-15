@@ -101,32 +101,32 @@ impl WmoWeather {
             }
             WmoWeather::MainlyClear => {
                 if is_day {
-                    "\u{1F32E}"
+                    "\u{1F324}"
                 } else {
-                    "\u{1F319}"
+                    "\u{1F31A}"
                 }
             }
             WmoWeather::PartlyCloudy => "\u{26C5}",
-            WmoWeather::Overcast => "\u{2601}",
+            WmoWeather::Overcast => "\u{2601}\u{FE0F}",
             WmoWeather::Fog => "\u{1F32B}",
             WmoWeather::DepositingRimeFog => "\u{1F32B}",
-            WmoWeather::LightDrizzle => "\u{1F328}",
+            WmoWeather::LightDrizzle => "\u{1F327}",
             WmoWeather::ModerateDrizzle => "\u{1F327}",
             WmoWeather::DenseDrizzle => "\u{1F327}",
-            WmoWeather::FreezingDrizzle => "\u{1F328}",
-            WmoWeather::DenseFreezingDrizzle => "\u{1F328}",
+            WmoWeather::FreezingDrizzle => "\u{1F9CA}",
+            WmoWeather::DenseFreezingDrizzle => "\u{1F9CA}",
             WmoWeather::SlightRain => "\u{1F327}",
             WmoWeather::ModerateRain => "\u{1F327}",
             WmoWeather::HeavyRain => "\u{1F327}",
-            WmoWeather::FreezingRain => "\u{1F32B}",
-            WmoWeather::SlightSnow => "\u{2744}",
-            WmoWeather::ModerateSnow => "\u{2744}",
-            WmoWeather::HeavySnow => "\u{2744}",
-            WmoWeather::SnowGrains => "\u{2744}",
+            WmoWeather::FreezingRain => "\u{1F9CA}",
+            WmoWeather::SlightSnow => "\u{2744}\u{FE0F}",
+            WmoWeather::ModerateSnow => "\u{1F328}",
+            WmoWeather::HeavySnow => "\u{1F328}",
+            WmoWeather::SnowGrains => "\u{1F328}",
             WmoWeather::RainShowers => "\u{1F327}",
-            WmoWeather::SnowShowers => "\u{2744}",
-            WmoWeather::Thunderstorm => "\u{26C8}",
-            WmoWeather::ThunderstormWithHail => "\u{26C8}",
+            WmoWeather::SnowShowers => "\u{2744}\u{FE0F}",
+            WmoWeather::Thunderstorm => "\u{26C8}\u{FE0F}",
+            WmoWeather::ThunderstormWithHail => "\u{26C8}\u{FE0F}",
             WmoWeather::Unknown(_) => "\u{2753}",
         }
     }

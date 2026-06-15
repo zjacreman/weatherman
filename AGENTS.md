@@ -154,17 +154,17 @@ On startup, `App::new()` loads the saved config and sets `pending_auto_search`. 
 |------------- | ----------------------- | ----------------------------- |
 | 0            | Clear Sky              | ☀️ (day) / 🌙 (night)         |
 | is_day (current) | f64 (0.0 or 1.0) | N/A | Not a weather code        |
-| 1            | Mainly Clear           | —                             |
+| 1            | Mainly Clear           | 🌤️ (day) / 🌚 (night)         |
 | 2            | Partly Cloudy          | ⛅                            |
 | 3            | Overcast               | ☁️                            |
 | 45, 48       | Fog                    | 🌫️                            |
-| 51, 53, 55   | Light/Moderate/Dense Drizzle | 🌦️                    |
-| 56, 57       | Freezing Drizzle       | 🌦️                            |
-| 58           | Dense Freezing Drizzle | 🌦️                            |
+| 51, 53, 55   | Light/Moderate/Dense Drizzle | 🌧️                    |
+| 56, 57       | Freezing Drizzle       | 🧊                            |
+| 58           | Dense Freezing Drizzle | 🧊                            |
 | 61, 63, 65   | Light/Moderate/Heavy Rain | 🌧️                         |
-| 66, 67       | Freezing Rain          | 🌫️                            |
+| 66, 67       | Freezing Rain          | 🧊                            |
 | 71, 73, 75   | Light/Moderate/Heavy Snow | ❄️                         |
-| 77           | Snow Grains            | ❄️                            |
+| 77           | Snow Grains            | 🌨️                            |
 | 80, 81, 82   | Rain Showers           | 🌧️                            |
 | 85, 86, 87   | Snow Showers           | ❄️                            |
 | 95           | Thunderstorm           | ⛈️                            |
