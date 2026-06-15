@@ -22,7 +22,7 @@ use ratatui::widgets::{Block, Paragraph};
 use ratatui::Terminal;
 
 mod config;
-use app::{App, AppState, Message, WmoWeather};
+use app::{App, AppState, Message, TempUnit, WmoWeather};
 use chrono::Timelike;
 use chrono_tz::Tz;
 
@@ -93,8 +93,22 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Resul
     }
 
     let mut last_tick = std::time::Instant::now();
+    // The forecast statuses contain variable-presentation emoji (e.g. 🌤️ =
+    // U+1F324 U+FE0F) whose terminal display width is ambiguous. ratatui's
+    // incremental diff emits them in a different print context after a partial
+    // repaint, which desyncs column alignment (the "Mainly clear" → "Mainlyclear"
+    // bug). Forcing a full clear+repaint whenever the visible content changes
+    // makes every frame render like the (correct) initial frame. We detect those
+    // changes with a cheap signature of the state that affects what is drawn:
+    // active tab, unit, either modal's visibility, and the last-update stamp
+    // (which changes on refresh / new location data).
+    let mut displayed_view = view_signature(&app);
 
     loop {
+        if view_signature(&app) != displayed_view {
+            terminal.clear()?;
+            displayed_view = view_signature(&app);
+        }
         terminal.draw(|frame| {
             draw(frame.area(), &app, frame);
         })?;
@@ -122,7 +136,13 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Resul
             app.update(Message::Tick);
         }
 
-        // Draw again to show the new state (e.g., "Searching..." from LoadingSearch)
+        // Draw again to show the new state (e.g., "Searching..." from LoadingSearch).
+        // Key handling above runs between the two draws, so re-check the view
+        // signature here and force a full repaint when it changed (see note above).
+        if view_signature(&app) != displayed_view {
+            terminal.clear()?;
+            displayed_view = view_signature(&app);
+        }
         terminal.draw(|frame| {
             draw(frame.area(), &app, frame);
         })?;
@@ -188,6 +208,19 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Resul
     }
 
     Ok(())
+}
+
+/// Cheap fingerprint of the state that determines what is painted, used to
+/// decide when a full repaint is needed instead of ratatui's incremental diff
+/// (see the note in the event loop about ambiguous-width emoji).
+fn view_signature(app: &App) -> (u16, TempUnit, bool, bool, Option<String>) {
+    (
+        app.active_tab,
+        app.temperature_unit,
+        app.search_modal_active,
+        app.error_modal_visible,
+        app.last_update.clone(),
+    )
 }
 
 fn draw(area: Rect, app: &App, frame: &mut ratatui::Frame) {
