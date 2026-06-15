@@ -14,3 +14,7 @@ chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
 anyhow = "1"
 toml = "0.8"
+
+[dev-dependencies]
+# https://crates.io/crates/unicode-width — measure terminal display width to assert weather icon alignment (same crate ratatui uses for layout)
+unicode-width = "0.2"

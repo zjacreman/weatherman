@@ -33,7 +33,7 @@ fn wmo_partly_cloudy_icon() {
 fn wmo_overcast_icon() {
     let w = WmoWeather::from(3);
     assert!(matches!(w, WmoWeather::Overcast));
-    assert_eq!(w.icon(true), "\u{2601}");
+    assert_eq!(w.icon(true), "\u{2601}\u{FE0F}");
 }
 
 #[test]
@@ -155,6 +155,32 @@ fn wmo_freezing_drizzle_code() {
     let w = WmoWeather::from(56);
     assert!(matches!(w, WmoWeather::FreezingDrizzle));
     assert_eq!(w.description(), "Freezing drizzle");
+}
+
+#[test]
+fn all_icons_have_consistent_display_width() {
+    use unicode_width::UnicodeWidthStr;
+
+    // Every weather code maps to an icon. The forecast renders "{icon} {description}",
+    // so every icon must occupy the same terminal width or the descriptions misalign.
+    // Full-width emoji are 2 cells; the layout engine (ratatui) measures via unicode-width,
+    // so default-text-presentation glyphs lacking a U+FE0F selector break alignment.
+    let codes = [0u8, 1, 2, 3, 45, 48, 51, 53, 55, 56, 58, 61, 63, 65, 66, 71, 73, 75, 77, 80, 85, 95, 96];
+    for code in codes {
+        let w = WmoWeather::from(code);
+        let day = w.icon(true);
+        let night = w.icon(false);
+        assert_eq!(
+            UnicodeWidthStr::width(day),
+            2,
+            "day icon for code {code} ({day:?}) is not 2 cells wide"
+        );
+        assert_eq!(
+            UnicodeWidthStr::width(night),
+            2,
+            "night icon for code {code} ({night:?}) is not 2 cells wide"
+        );
+    }
 }
 
 // ────────────────────────────────────────────────────
