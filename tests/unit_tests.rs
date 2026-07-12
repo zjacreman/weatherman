@@ -5,9 +5,54 @@
 use weatherman::config;
 use weatherman::Color;
 use weatherman::api::client;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, KeyEventKind};
 use std::time::Duration;
-use weatherman::{App, AppState, Location, Message, SavedConfig, TempUnit, WmoWeather};
+use weatherman::{App, AppState, CurrentWeather, DailyForecast, HourlyForecast, Location, Message, SavedConfig, TempUnit, WmoWeather};
 use weatherman::{GeocodingResult, WeatherResponse};
+
+/// Build a minimal `Message::WeatherFetchedBoxed` carrying empty hourly/daily
+/// forecasts — enough to drive the `update` state machine in tests without
+/// constructing real API payloads.
+fn weather_fetched_msg() -> Message {
+    Message::WeatherFetchedBoxed(
+        CurrentWeather {
+            time: "2024-01-01T00:00".to_string(),
+            temperature: 0.0,
+            apparent_temperature: 0.0,
+            humidity: 0,
+            wind_speed: 0.0,
+            wind_direction: 0,
+            wind_gusts: 0.0,
+            precipitation: 0.0,
+            weather_code: 0,
+            is_day: true,
+            pressure: None,
+            uv_index: None,
+            visibility: None,
+            dewpoint: None,
+        },
+        Box::new(HourlyForecast {
+            times: vec![],
+            temperatures: vec![],
+            humidities: vec![],
+            weather_codes: vec![],
+            precipitations: vec![],
+            wind_speeds: vec![],
+            is_day: vec![],
+            pressures: None,
+        }),
+        Box::new(DailyForecast {
+            dates: vec![],
+            temp_high: vec![],
+            temp_low: vec![],
+            weather_codes: vec![],
+            sunrise: vec![],
+            sunset: vec![],
+            precip_sum: vec![],
+            wind_max: vec![],
+        }),
+    )
+}
 
 // ────────────────────────────────────────────────────
 // WMO Weather Code tests
@@ -589,7 +634,7 @@ fn message_variants_constructible() {
     let _clear = Message::SearchClear;
     let _results = Message::SearchResultsReceived(vec![]);
     let _err = Message::SearchError("oops".into());
-    let _fetched = Message::WeatherFetched;
+    let _fetched = weather_fetched_msg();
     let _werr = Message::WeatherError("bad".into());
     let _toggle = Message::ToggleUnit;
     let _modal = Message::SearchModal { active: true };
@@ -836,7 +881,7 @@ fn last_update_format_is_local_hhmmss() {
     assert!(app.last_update.is_none());
 
     // Trigger WeatherFetched which sets last_update
-    app.update(Message::WeatherFetched);
+    app.update(weather_fetched_msg());
 
     // last_update should now be set
     assert!(app.last_update.is_some());
@@ -957,7 +1002,7 @@ fn auto_refresh_timer_with_location() {
     assert!(matches!(app.state, AppState::Refreshing));
 
     // Verify that once Refreshing, a WeatherFetched message resets to Idle
-    app.update(Message::WeatherFetched);
+    app.update(weather_fetched_msg());
     assert!(matches!(app.state, AppState::Idle));
 }
 
@@ -978,11 +1023,9 @@ fn config_save_load_roundtrip() {
     std::fs::create_dir_all(&config_dir).unwrap();
 
     let config_file = config_dir.join("weatherman.toml");
-    let toml_content = format!(
-        r#"name = "Test City"
+    let toml_content = r#"name = "Test City"
 refresh_interval = 3600
-"#
-    );
+"#;
     std::fs::write(&config_file, toml_content).unwrap();
 
     let (config, loaded_path) =
@@ -1145,9 +1188,10 @@ fn search_input_sets_query() {
 fn weather_fetched_sets_last_update_and_idle() {
     let mut app = App::new();
     app.state = AppState::LoadingWeather;
-    app.update(Message::WeatherFetched);
+    app.update(weather_fetched_msg());
     assert!(matches!(app.state, AppState::Idle));
     assert!(app.last_update.is_some());
+    assert!(app.current.is_some(), "WeatherFetchedBoxed should populate current");
 }
 
 #[test]
@@ -1231,3 +1275,344 @@ fn forecast_url_contains_required_params() {
     assert!(url.contains("hourly=temperature_2m"));
     assert!(url.contains("daily=weather_code"));
 }
+
+// ─────────────────────────────────────────────────
+// Wind speed conversion (regression for the km/h→mph bug)
+// ─────────────────────────────────────────────────
+
+#[test]
+fn convert_wind_speed_celsius_preserves_kmh() {
+    // Celsius mode must NOT convert — Open-Meteo already returns km/h.
+    let mut app = App::new();
+    app.temperature_unit = TempUnit::Celsius;
+    // 36 km/h should stay 36 km/h (previously it became ~22 and was mislabeled).
+    assert!((app.convert_wind_speed_kmh(36.0) - 36.0).abs() < f32::EPSILON);
+    assert_eq!(app.format_wind_speed(36.0), "36 km/h");
+}
+
+#[test]
+fn convert_wind_speed_fahrenheit_converts_to_mph() {
+    let mut app = App::new();
+    app.temperature_unit = TempUnit::Fahrenheit;
+    // 36 km/h ≈ 22.37 mph → rounded to 22 mph.
+    let mph = app.convert_wind_speed_kmh(36.0);
+    assert!((mph - 22.37).abs() < 0.1, "expected ~22 mph, got {mph}");
+    assert_eq!(app.format_wind_speed(36.0), "22 mph");
+}
+
+#[test]
+fn format_wind_speed_zero() {
+    let mut app = App::new();
+    app.temperature_unit = TempUnit::Celsius;
+    assert_eq!(app.format_wind_speed(0.0), "0 km/h");
+    app.temperature_unit = TempUnit::Fahrenheit;
+    assert_eq!(app.format_wind_speed(0.0), "0 mph");
+}
+
+// ─────────────────────────────────────────────────
+// handle_key tests (moved to lib for testability)
+// ─────────────────────────────────────────────────
+
+/// Helper: build a KeyEvent with the given Char + no modifiers.
+fn key_char(c: char) -> KeyEvent {
+    KeyEvent::new_with_kind(KeyCode::Char(c), KeyModifiers::NONE, KeyEventKind::Press)
+}
+
+#[test]
+fn quit_key_sets_is_quit() {
+    let mut app = App::new();
+    app.handle_key(key_char('q'));
+    assert!(app.is_quit, "'q' should set is_quit");
+}
+
+#[test]
+fn ctrl_c_sets_is_quit() {
+    let mut app = App::new();
+    let key = KeyEvent::new_with_kind(
+        KeyCode::Char('c'),
+        KeyModifiers::CONTROL,
+        KeyEventKind::Press,
+    );
+    app.handle_key(key);
+    assert!(app.is_quit, "Ctrl+C should set is_quit");
+}
+
+#[test]
+fn s_key_opens_search_modal() {
+    let mut app = App::new();
+    app.handle_key(key_char('s'));
+    assert!(app.search_modal_active, "'s' should open the search modal");
+}
+
+#[test]
+fn esc_closes_search_modal() {
+    let mut app = App::new();
+    app.handle_key(key_char('s'));
+    assert!(app.search_modal_active);
+    app.handle_key(KeyEvent::new_with_kind(
+        KeyCode::Esc,
+        KeyModifiers::NONE,
+        KeyEventKind::Press,
+    ));
+    assert!(!app.search_modal_active, "Esc should close the search modal");
+    assert!(app.search_query.is_empty(), "Esc should clear the search query");
+}
+
+#[test]
+fn search_modal_typing_appends_to_query() {
+    let mut app = App::new();
+    app.handle_key(key_char('s'));
+    app.handle_key(key_char('B'));
+    app.handle_key(key_char('e'));
+    app.handle_key(key_char('r'));
+    app.handle_key(key_char('l'));
+    app.handle_key(key_char('i'));
+    app.handle_key(key_char('n'));
+    assert_eq!(app.search_query, "Berlin");
+}
+
+#[test]
+fn tab_key_cycles_between_daily_and_hourly() {
+    let mut app = App::new();
+    assert_eq!(app.active_tab, 0, "default tab is Daily (0)");
+    app.handle_key(KeyEvent::new_with_kind(
+        KeyCode::Tab,
+        KeyModifiers::NONE,
+        KeyEventKind::Press,
+    ));
+    assert_eq!(app.active_tab, 1, "first Tab should switch to Hourly (1)");
+    app.handle_key(KeyEvent::new_with_kind(
+        KeyCode::Tab,
+        KeyModifiers::NONE,
+        KeyEventKind::Press,
+    ));
+    assert_eq!(app.active_tab, 0, "second Tab should return to Daily (0)");
+}
+
+#[test]
+fn u_key_toggles_unit() {
+    let mut app = App::new();
+    assert!(matches!(app.temperature_unit, TempUnit::Celsius));
+    app.handle_key(key_char('u'));
+    assert!(matches!(app.temperature_unit, TempUnit::Fahrenheit));
+    app.handle_key(key_char('U'));
+    assert!(matches!(app.temperature_unit, TempUnit::Celsius));
+}
+
+#[test]
+fn r_key_triggers_refresh_when_location_set() {
+    let mut app = App::new();
+    // No location → 'r' is a no-op (state stays Idle).
+    app.handle_key(key_char('r'));
+    assert!(matches!(app.state, AppState::Idle));
+    // With location → 'r' sets state to Refreshing.
+    app.location = Some(Location {
+        id: 1,
+        name: "Test".into(),
+        admin1: None,
+        country: "X".into(),
+        country_code: "XX".into(),
+        latitude: 0.0,
+        longitude: 0.0,
+        timezone: "UTC".into(),
+        population: None,
+    });
+    app.handle_key(key_char('r'));
+    assert!(matches!(app.state, AppState::Refreshing));
+}
+
+#[test]
+fn ctrl_u_clears_search_query() {
+    let mut app = App::new();
+    app.handle_key(key_char('s'));
+    app.search_query = "Stockholm".into();
+    let key = KeyEvent::new_with_kind(
+        KeyCode::Char('u'),
+        KeyModifiers::CONTROL,
+        KeyEventKind::Press,
+    );
+    app.handle_key(key);
+    assert!(app.search_query.is_empty(), "Ctrl+U should clear the query");
+}
+
+#[test]
+fn handle_key_unrecognized_returns_false() {
+    let mut app = App::new();
+    let handled = app.handle_key(KeyEvent::new_with_kind(
+        KeyCode::BackTab,
+        KeyModifiers::NONE,
+        KeyEventKind::Press,
+    ));
+    assert!(!handled, "unrecognized keys should not be reported as handled");
+}
+
+// ─────────────────────────────────────────────────
+// Pressure trend indexing (regression for end-of-array bug)
+// ─────────────────────────────────────────────────
+
+#[test]
+fn pressure_trend_anchors_on_current_time_not_array_end() {
+    // Hourly array starts at midnight; current observation is 06:00. The trend
+    // must compare 06:00's pressure against 03:00's, NOT the (irrelevant) last
+    // entries of the array.
+    let hourly = HourlyForecast {
+        times: (0..24).map(|h| format!("2024-01-01T{h:02}:00")).collect(),
+        temperatures: vec![],
+        humidities: vec![],
+        weather_codes: vec![],
+        precipitations: vec![],
+        wind_speeds: vec![],
+        is_day: vec![],
+        pressures: Some((0..24).map(|h| 1000.0 + h as f32).collect()), // rising 1000→1023
+    };
+    // current.time = "2024-01-01T06:00" → index 6. pressure there = 1006.0.
+    // 3h earlier = index 3 → pressure 1003.0. diff = +3 → Rising.
+    let trend = hourly.pressure_trend(1006.0, "2024-01-01T06:00");
+    assert_eq!(trend, Some(("Rising", "↑")));
+}
+
+#[test]
+fn pressure_trend_falling_anchors_on_current_time() {
+    let hourly = HourlyForecast {
+        times: (0..24).map(|h| format!("2024-01-01T{h:02}:00")).collect(),
+        temperatures: vec![],
+        humidities: vec![],
+        weather_codes: vec![],
+        precipitations: vec![],
+        wind_speeds: vec![],
+        is_day: vec![],
+        // falling 1023→1000
+        pressures: Some((0..24).map(|h| 1023.0 - h as f32).collect()),
+    };
+    // current at 10:00 → index 10 → pressure 1013. 3h earlier index 7 → 1016.
+    // diff = 1013 - 1016 = -3 → Falling.
+    let trend = hourly.pressure_trend(1013.0, "2024-01-01T10:00");
+    assert_eq!(trend, Some(("Falling", "↓")));
+}
+
+#[test]
+fn pressure_trend_steady_when_diff_under_threshold() {
+    let hourly = HourlyForecast {
+        times: (0..24).map(|h| format!("2024-01-01T{h:02}:00")).collect(),
+        temperatures: vec![],
+        humidities: vec![],
+        weather_codes: vec![],
+        precipitations: vec![],
+        wind_speeds: vec![],
+        is_day: vec![],
+        pressures: Some(vec![1012.0; 24]), // flat
+    };
+    let trend = hourly.pressure_trend(1012.0, "2024-01-01T12:00");
+    assert_eq!(trend, Some(("Steady", "→")));
+}
+
+#[test]
+fn pressure_trend_none_without_enough_history() {
+    // Only 2 entries before the current time → cannot go back 3 hours.
+    let hourly = HourlyForecast {
+        times: vec![
+            "2024-01-01T00:00".into(),
+            "2024-01-01T01:00".into(),
+            "2024-01-01T02:00".into(),
+        ],
+        temperatures: vec![],
+        humidities: vec![],
+        weather_codes: vec![],
+        precipitations: vec![],
+        wind_speeds: vec![],
+        is_day: vec![],
+        pressures: Some(vec![1010.0, 1011.0, 1012.0]),
+    };
+    // index 2 has only 2 prior entries — need idx >= 3 for the 3h lookback.
+    let trend = hourly.pressure_trend(1012.0, "2024-01-01T02:00");
+    assert_eq!(trend, None);
+}
+
+#[test]
+fn pressure_trend_none_without_pressures() {
+    let hourly = HourlyForecast {
+        times: vec!["2024-01-01T00:00".into()],
+        temperatures: vec![],
+        humidities: vec![],
+        weather_codes: vec![],
+        precipitations: vec![],
+        wind_speeds: vec![],
+        is_day: vec![],
+        pressures: None,
+    };
+    assert_eq!(hourly.pressure_trend(1010.0, "2024-01-01T00:00"), None);
+}
+
+// ─────────────────────────────────────────────────
+// Search error clears search modal (Important #1 regression)
+// ─────────────────────────────────────────────────
+
+#[test]
+fn search_error_closes_search_modal_and_clears_results() {
+    let mut app = App::new();
+    app.search_modal_active = true;
+    app.search_query = " Atlantis".into();
+    app.search_results = vec![Location {
+        id: 1, name: "Atlantis".into(), admin1: None,
+        country: "Myth".into(), country_code: "MY".into(),
+        latitude: 0.0, longitude: 0.0, timezone: "UTC".into(),
+        population: None,
+    }];
+    app.update(Message::SearchError("network down".into()));
+    assert!(app.error_modal_visible);
+    assert!(!app.search_modal_active, "SearchError should close the search modal");
+    assert!(app.search_results.is_empty(), "SearchError should clear stale results");
+    assert!(!app.search_pending, "SearchError should clear the in-flight flag");
+    assert!(matches!(app.state, AppState::Idle));
+}
+
+// ─────────────────────────────────────────────────
+// Startup AutoSearchResult message
+// ─────────────────────────────────────────────────
+
+#[test]
+fn auto_search_result_sets_location_and_triggers_weather_fetch() {
+    let mut app = App::new();
+    app.update(Message::AutoSearchResult {
+        name: "Tokyo".into(),
+        results: vec![Location {
+            id: 1, name: "Tokyo".into(), admin1: None,
+            country: "Japan".into(), country_code: "JP".into(),
+            latitude: 35.68, longitude: 139.69, timezone: "Asia/Tokyo".into(),
+            population: None,
+        }],
+    });
+    assert!(app.location.is_some());
+    assert_eq!(app.location.as_ref().unwrap().name, "Tokyo");
+    assert!(matches!(app.state, AppState::LoadingWeather));
+    assert!(!app.search_pending);
+}
+
+#[test]
+fn auto_search_result_not_found_shows_error() {
+    let mut app = App::new();
+    app.update(Message::AutoSearchResult {
+        name: "Atlantis".into(),
+        results: vec![],
+    });
+    assert!(app.location.is_none());
+    assert!(app.error_modal_visible);
+    assert!(app.error_message.as_deref().unwrap().contains("Atlantis"));
+    assert!(matches!(app.state, AppState::Idle));
+}
+
+#[test]
+fn weather_fetched_boxed_populates_and_clears_pending() {
+    let mut app = App::new();
+    app.state = AppState::LoadingWeather;
+    app.weather_pending = true;
+    app.update(weather_fetched_msg());
+    assert!(matches!(app.state, AppState::Idle));
+    assert!(app.current.is_some());
+    assert!(app.hourly.is_some());
+    assert!(app.daily.is_some());
+    assert!(app.last_update.is_some());
+    assert!(!app.weather_pending);
+}
+
+

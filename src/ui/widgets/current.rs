@@ -1,9 +1,12 @@
 use crate::app::{App, WmoWeather};
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Paragraph};
+use unicode_width::UnicodeWidthStr;
 
-/// Simple greedy word-wrap: breaks `text` into lines of at most `width` display columns,
-/// never splitting a word in the middle.
+/// Greedy word-wrap that breaks `text` into lines of at most `width` display
+/// columns, never splitting a word in the middle. Uses display width (not byte
+/// length) so multi-byte location names (e.g. "München", "São Paulo") wrap
+/// correctly on narrow terminals.
 fn wrap_text(text: &str, width: u16) -> Vec<String> {
     let width = width as usize;
     if width == 0 {
@@ -13,15 +16,18 @@ fn wrap_text(text: &str, width: u16) -> Vec<String> {
     let mut current_line = String::new();
     for word in text.split_whitespace() {
         let extra = if current_line.is_empty() { 0 } else { 1 };
-        if current_line.len() + extra + word.len() > width {
+        let line_w = current_line.width();
+        let word_w = word.width();
+        if line_w + extra + word_w > width {
             if !current_line.is_empty() {
                 lines.push(std::mem::take(&mut current_line));
             }
-            if word.len() > width {
-                // Word itself exceeds width; split it (rare for normal location names)
+            if word_w > width {
+                // Word itself exceeds width; split it on display-width boundaries.
                 let mut remaining = word;
-                while remaining.len() > width {
-                    let (chunk, rest) = remaining.split_at(width);
+                while remaining.width() > width {
+                    let split = split_at_width(remaining, width);
+                    let (chunk, rest) = split;
                     lines.push(chunk.to_string());
                     remaining = rest;
                 }
@@ -43,6 +49,22 @@ fn wrap_text(text: &str, width: u16) -> Vec<String> {
         lines.push(text.to_string());
     }
     lines
+}
+
+/// Split `s` at the largest char boundary such that the leading slice has a
+/// display width <= `max`. Returns `(head, tail)`.
+fn split_at_width(s: &str, max: usize) -> (&str, &str) {
+    let mut end = 0;
+    let mut width = 0;
+    for (idx, ch) in s.char_indices() {
+        let ch_w = ch.to_string().width();
+        if width + ch_w > max {
+            break;
+        }
+        width += ch_w;
+        end = idx + ch.len_utf8();
+    }
+    s.split_at(end)
 }
 
 fn uv_color(uv: f32) -> Color {
@@ -91,7 +113,6 @@ impl Widget for CurrentWidget<'_> {
 
         let current = self.app.current.as_ref().unwrap();
         let location = self.app.location.as_ref().unwrap();
-        let hourly_pressures = self.app.hourly.as_ref().and_then(|h| h.pressures.as_ref());
         let wmo = WmoWeather::from(current.weather_code);
 
         let temp = self.app.format_temp(current.temperature);
@@ -194,18 +215,20 @@ impl Widget for CurrentWidget<'_> {
             lines.push(line);
         }
 
-        // Pressure with trend
+        // Pressure with trend.
+        // The trend compares the current pressure against the value ~3 hours
+        // earlier. We must anchor on the *current* observation time, not the
+        // end of the hourly array — Open-Meteo's hourly series often starts
+        // at local midnight, so the last entry may be many hours *ahead* of
+        // `current.time`. `pressure_trend` walks the timestamps to find the
+        // slot at/before the current observation, then steps back 3 slots.
         if let Some(pressure) = current.pressure {
-            let trend = if let Some(pressures) = hourly_pressures {
-                if pressures.len() >= 4 {
-                    let prev = pressures[pressures.len() - 4];
-                    crate::ui::helpers::format_pressure_trend(pressure, prev)
-                } else {
-                    ("—", "")
-                }
+            let trend = if let Some(hourly) = self.app.hourly.as_ref() {
+                hourly.pressure_trend(pressure, &current.time)
             } else {
-                ("—", "")
+                None
             };
+            let (label, arrow): (&str, &str) = trend.unwrap_or(("—", ""));
             lines.push(Line::from(vec![
                 Span::styled("Pressure:", Style::default().fg(Color::Gray)),
                 Span::raw("  "),
@@ -215,10 +238,10 @@ impl Widget for CurrentWidget<'_> {
                 ),
                 Span::raw("  "),
                 Span::styled(
-                    format!("{} {}", trend.1, trend.0),
-                    Style::default().fg(if trend.0 == "Rising" {
+                    format!("{} {}", arrow, label),
+                    Style::default().fg(if label == "Rising" {
                         Color::Rgb(76, 175, 80)
-                    } else if trend.0 == "Falling" {
+                    } else if label == "Falling" {
                         Color::Rgb(244, 67, 54)
                     } else {
                         Color::Gray

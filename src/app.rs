@@ -1,3 +1,4 @@
+use crossterm::event::{KeyCode, KeyModifiers};
 use serde::Deserialize;
 use std::time::Duration;
 
@@ -219,6 +220,42 @@ pub struct HourlyForecast {
     pub pressures: Option<Vec<f32>>,
 }
 
+impl HourlyForecast {
+    /// Find the hourly index whose timestamp is closest to (and not after) the
+    /// given current observation time string in `YYYY-MM-DDTHH:MM` form.
+    /// Falls back to the last index if none match.
+    pub fn pressure_index_for(&self, current_time: &str) -> Option<usize> {
+        let pressures = self.pressures.as_ref()?;
+        // current.time is "YYYY-MM-DDTHH:MM"; hourly time has the same prefix.
+        // Find the last hourly slot whose time <= current_time.
+        let mut found: Option<usize> = None;
+        for (i, t) in self.times.iter().enumerate() {
+            // Compare lexicographically — ISO format sorts chronologically.
+            if t.as_str() <= current_time {
+                found = Some(i);
+            } else {
+                break;
+            }
+        }
+        found.or(Some(pressures.len().saturating_sub(1)))
+    }
+
+    /// Compare the pressure ~3 hours before `current_time` against the
+    /// current pressure, returning (trend, arrow). Returns None if there
+    /// isn't enough history.
+    pub fn pressure_trend(&self, current_pressure: f32, current_time: &str) -> Option<(&'static str, &'static str)> {
+        let idx = self.pressure_index_for(current_time)?;
+        let pressures = self.pressures.as_ref()?;
+        // Each hourly slot is 1 hour, so 3 slots earlier ~ 3h ago.
+        if idx >= 3 {
+            let prev = pressures[idx - 3];
+            Some(crate::ui::helpers::format_pressure_trend(current_pressure, prev))
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct DailyForecast {
     pub dates: Vec<String>,
@@ -272,14 +309,17 @@ pub enum Message {
     #[allow(dead_code)]
     SearchSubmit,
     SearchClear,
-    #[allow(dead_code)]
     SearchResultsReceived(Vec<Location>),
-    #[allow(dead_code)]
     SearchError(String),
-    WeatherFetched,
+    /// Weather data delivered by a spawned async task. Carries the three
+    /// deserialized models so the event loop can store them on `App`. The
+    /// hourly/daily vectors are boxed to keep the enum small (clippy:
+    /// large_enum_variant) since they can be hundreds of entries each.
+    WeatherFetchedBoxed(CurrentWeather, Box<HourlyForecast>, Box<DailyForecast>),
     WeatherError(String),
+    /// Result of the startup auto-search for the persisted location name.
+    AutoSearchResult { name: String, results: Vec<Location> },
     ToggleUnit,
-    #[allow(dead_code)]
     Key(KeyEvent),
     SearchModal { active: bool },
 }
@@ -306,6 +346,11 @@ pub struct App {
     pub tick_count: u64,
     pub pending_auto_search: Option<String>,
     pub last_config_path: Option<std::path::PathBuf>,
+    /// True while a geocoding search task is in flight — prevents re-spawning
+    /// every loop iteration while `state == LoadingSearch`.
+    pub search_pending: bool,
+    /// True while a weather fetch is in flight — same purpose.
+    pub weather_pending: bool,
 }
 
 impl Default for App {
@@ -336,6 +381,8 @@ impl App {
             tick_count: 0,
             pending_auto_search: None,
             last_config_path: None,
+            search_pending: false,
+            weather_pending: false,
         };
 
         // Load any previously saved location.
@@ -365,9 +412,10 @@ impl App {
     }
 
     pub fn convert_wind_speed_kmh(&self, speed_kmh: f32) -> f32 {
-        // kmh = mph * 1.60934
-        // mph = kmh / 1.60934
-        speed_kmh / 1.60934
+        match self.temperature_unit {
+            TempUnit::Celsius => speed_kmh,
+            TempUnit::Fahrenheit => speed_kmh / 1.60934,
+        }
     }
 
     pub fn format_wind_speed(&self, speed_kmh: f32) -> String {
@@ -392,6 +440,119 @@ impl App {
         self.error_modal_visible = true;
     }
 
+    /// Dispatch a keyboard event. Returns `true` if the key was consumed.
+    ///
+    /// Moved out of the binary crate so it is reachable from integration tests.
+    pub fn handle_key(&mut self, key: KeyEvent) -> bool {
+        // Handle search modal keys
+        if self.search_modal_active {
+            match key.code {
+                KeyCode::Esc => {
+                    self.update(Message::SearchModal { active: false });
+                    self.update(Message::SearchClear);
+                    return false;
+                }
+                KeyCode::Enter => {
+                    if !self.search_results.is_empty()
+                        && (self.search_selected_idx as usize) < self.search_results.len()
+                    {
+                        let selected = self.search_results[self.search_selected_idx as usize].clone();
+                        self.search_modal_active = false;
+                        self.search_query.clear();
+                        self.search_results.clear();
+                        self.search_selected_idx = 0;
+                        self.location = Some(selected);
+                        self.state = AppState::LoadingWeather;
+                        return false;
+                    }
+                    if !self.search_query.is_empty() {
+                        self.state = AppState::LoadingSearch;
+                        return false;
+                    }
+                    return false;
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    if self.search_selected_idx > 0 {
+                        self.search_selected_idx -= 1;
+                    }
+                    return false;
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    if self.search_selected_idx + 1 < self.search_results.len() as u16 {
+                        self.search_selected_idx += 1;
+                    }
+                    return false;
+                }
+                KeyCode::Char('u') if key.modifiers == KeyModifiers::CONTROL => {
+                    self.search_query.clear();
+                    return false;
+                }
+                KeyCode::Char(c) => {
+                    self.search_query.push(c);
+                    return false;
+                }
+                KeyCode::Backspace => {
+                    self.search_query.pop();
+                    return false;
+                }
+                _ => {}
+            }
+        }
+
+        match key.code {
+            KeyCode::Char('c') if key.modifiers == KeyModifiers::CONTROL => {
+                self.is_quit = true;
+                true
+            }
+            KeyCode::Char('q') => {
+                self.is_quit = true;
+                true
+            }
+            KeyCode::Esc => {
+                if self.search_modal_active {
+                    self.update(Message::SearchModal { active: false });
+                    self.update(Message::SearchClear);
+                    true
+                } else if self.error_modal_visible {
+                    self.error_modal_visible = false;
+                    self.error_message = None;
+                    true
+                } else if self.error_message.is_some() {
+                    self.error_message = None;
+                    true
+                } else {
+                    false
+                }
+            }
+            KeyCode::Char('s') | KeyCode::Char('S') => {
+                self.search_query.clear();
+                self.search_results.clear();
+                self.search_selected_idx = 0;
+                self.state = AppState::Idle;
+                self.update(Message::SearchModal { active: true });
+                true
+            }
+            KeyCode::Char('u') | KeyCode::Char('U') => {
+                self.update(Message::ToggleUnit);
+                true
+            }
+            KeyCode::Char('r') | KeyCode::Char('R') => {
+                if self.location.is_some() {
+                    self.state = AppState::Refreshing;
+                }
+                true
+            }
+            KeyCode::Tab => {
+                self.active_tab = match self.active_tab {
+                    0 => 1,
+                    _ => 0,
+                };
+                true
+            }
+            _ => false,
+        }
+    }
+
     pub fn update(&mut self, msg: Message) {
         match msg {
             Message::SearchInput(s) => {
@@ -407,7 +568,11 @@ impl App {
                 self.state = AppState::Idle;
             }
             Message::SearchResultsReceived(results) => {
+                self.search_pending = false;
                 self.search_results = results;
+                self.search_modal_active = true;
+                self.search_selected_idx = 0;
+                self.state = AppState::Idle;
                 if self.search_results.is_empty() && self.search_query.len() >= 2 {
                     self.error_message = Some("No locations found".to_string());
                 } else {
@@ -415,17 +580,36 @@ impl App {
                 }
             }
             Message::SearchError(e) => {
+                self.search_pending = false;
+                self.state = AppState::Idle;
                 self.error_message = Some(e);
                 self.error_modal_visible = true;
                 self.search_results.clear();
+                self.search_modal_active = false;
             }
-            Message::WeatherFetched => {
+            Message::AutoSearchResult { name, results } => {
+                self.search_pending = false;
+                if let Some(loc) = results.into_iter().next() {
+                    self.location = Some(loc);
+                    self.state = AppState::LoadingWeather;
+                } else {
+                    self.error_message = Some(format!("Location '{name}' not found"));
+                    self.error_modal_visible = true;
+                    self.state = AppState::Idle;
+                }
+            }
+            Message::WeatherFetchedBoxed(current, hourly, daily) => {
+                self.weather_pending = false;
+                self.current = Some(current);
+                self.hourly = Some(*hourly);
+                self.daily = Some(*daily);
                 self.state = AppState::Idle;
                 self.last_update = Some(chrono::Local::now().format("%H:%M:%S").to_string());
                 self.error_message = None;
                 self.error_modal_visible = false;
             }
             Message::WeatherError(e) => {
+                self.weather_pending = false;
                 self.state = AppState::Idle;
                 self.error_message = Some(e);
                 self.error_modal_visible = true;
@@ -450,7 +634,9 @@ impl App {
                 self.search_modal_active = false;
                 self.search_selected_idx = 0;
             }
-            Message::Key(_) => {}
+            Message::Key(key) => {
+                let _ = self.handle_key(key);
+            }
         }
     }
 

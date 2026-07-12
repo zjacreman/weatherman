@@ -1,11 +1,14 @@
 use ratatui::prelude::*;
 use ratatui::widgets::Widget;
 use ratatui::widgets::{Block, Paragraph};
+use unicode_width::UnicodeWidthStr;
 
 pub struct ErrorModal<'a> {
     pub message: &'a str,
 }
 
+/// Word-wrap using display width (not byte length) so multi-byte error text
+/// wraps at the correct column on narrow terminals.
 fn word_wrap(text: &str, max_width: usize) -> Vec<String> {
     let mut lines = Vec::new();
     for paragraph in text.split('\n') {
@@ -17,7 +20,7 @@ fn word_wrap(text: &str, max_width: usize) -> Vec<String> {
         for word in paragraph.split_whitespace() {
             if current_line.is_empty() {
                 current_line.push_str(word);
-            } else if current_line.len() + 1 + word.len() <= max_width {
+            } else if current_line.width() + 1 + word.width() <= max_width {
                 current_line.push(' ');
                 current_line.push_str(word);
             } else {

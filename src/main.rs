@@ -9,7 +9,6 @@ use anyhow::Result;
 use crossterm::event::{
     self, DisableMouseCapture, EnableMouseCapture, Event as CrosstermEvent, KeyEventKind,
 };
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -18,8 +17,9 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Margin, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Paragraph};
+use ratatui::widgets::{Block, Clear, Paragraph};
 use ratatui::Terminal;
+use tokio::sync::mpsc;
 
 mod config;
 use app::{App, AppState, Message, TempUnit, WmoWeather};
@@ -73,26 +73,66 @@ async fn main() -> Result<()> {
     result
 }
 
+#[allow(clippy::too_many_lines)]
 async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Result<()> {
     let mut app = App::new();
 
-    // Auto-load saved location on startup if one was persisted.
-    if let Some(name) = app.pending_auto_search.take() {
-        if let Ok(results) = api::geocoding::search(&name).await {
-            if let Some(loc) = results.first() {
-                app.location = Some(loc.clone());
-                app.state = AppState::LoadingWeather;
-            } else {
-                app.error_message = Some(format!("Location '{}' not found", name));
-                app.error_modal_visible = true;
+    // mpsc channel carrying every state transition (keys, ticks, async results).
+    // Unbounded so senders in spawned tasks never have to await (they run to
+    // completion even if the main loop is busy drawing).
+    let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
+
+    // ── Keyboard listener: crossterm is a blocking sync API, so it runs on a
+    //    dedicated blocking thread and forwards KeyEvents as Messages.
+    {
+        let tx = tx.clone();
+        tokio::task::spawn_blocking(move || loop {
+            // poll for up to 100ms so the task can exit promptly if the channel closes
+            if event::poll(Duration::from_millis(100)).unwrap_or(false) {
+                if let Ok(CrosstermEvent::Key(key)) = event::read() {
+                    if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat)
+                        && tx.send(Message::Key(key)).is_err()
+                    {
+                        return;
+                    }
+                }
             }
-        } else {
-            app.error_message = Some(format!("Failed to search for location: {}", name));
-            app.error_modal_visible = true;
-        }
+        });
     }
 
-    let mut last_tick = std::time::Instant::now();
+    // ── Tick timer: one Message::Tick per second drives auto-refresh + redraws.
+    {
+        let tx = tx.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_millis(TICK_RATE));
+            loop {
+                interval.tick().await;
+                if tx.send(Message::Tick).is_err() {
+                    return;
+                }
+            }
+        });
+    }
+
+    // ── Startup auto-load: if a location was persisted, kick off the geocoding
+    //    search as a spawned task so the UI never blocks. The result returns as
+    //    Message::AutoSearchResult, which then triggers the weather fetch.
+    if let Some(name) = app.pending_auto_search.take() {
+        app.search_pending = true;
+        let tx = tx.clone();
+        let query = name.clone();
+        tokio::spawn(async move {
+            match with_retries(3, || async { api::geocoding::search(&query).await }).await {
+                Ok(results) => {
+                    let _ = tx.send(Message::AutoSearchResult { name, results });
+                }
+                Err(e) => {
+                    let _ = tx.send(Message::SearchError(e.to_string()));
+                }
+            }
+        });
+    }
+
     // The forecast statuses contain variable-presentation emoji (e.g. 🌤️ =
     // U+1F324 U+FE0F) whose terminal display width is ambiguous. ratatui's
     // incremental diff emits them in a different print context after a partial
@@ -113,96 +153,76 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Resul
             draw(frame.area(), &app, frame);
         })?;
 
-        let timeout = std::cmp::min(
-            TICK_RATE.saturating_sub(last_tick.elapsed().as_millis() as u64),
-            TICK_RATE,
-        );
+        // Block on the next Message — keys, ticks, and async results all arrive
+        // here. The UI stays responsive because no HTTP call lives on this task.
+        let Some(msg) = rx.recv().await else { break };
+        app.update(msg);
 
-        let event = event::poll(Duration::from_millis(timeout))?;
-        if event {
-            let crossterm_event = event::read()?;
-            if let CrosstermEvent::Key(key) = crossterm_event {
-                if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
-                    let handled = handle_key(&mut app, key);
-                    if handled && app.is_quitting() {
-                        break;
-                    }
-                }
-            }
+        if app.is_quitting() {
+            break;
         }
 
-        if last_tick.elapsed() >= Duration::from_millis(TICK_RATE) {
-            last_tick = std::time::Instant::now();
-            app.update(Message::Tick);
-        }
-
-        // Draw again to show the new state (e.g., "Searching..." from LoadingSearch).
-        // Key handling above runs between the two draws, so re-check the view
-        // signature here and force a full repaint when it changed (see note above).
-        if view_signature(&app) != displayed_view {
-            terminal.clear()?;
-            displayed_view = view_signature(&app);
-        }
-        terminal.draw(|frame| {
-            draw(frame.area(), &app, frame);
-        })?;
-
+        // After each state transition, launch any async work the new state implies.
+        // In-flight guards prevent spawning duplicate tasks.
         match app.state {
-            AppState::LoadingSearch => {
-                if !app.search_query.is_empty() {
-                    let query = app.search_query.clone();
-                    // Keep state as LoadingSearch so status bar shows "Searching..."
-                    // Keep search_query visible so modal shows typed text
-                    match with_retries(3, || async { api::geocoding::search(&query).await }).await {
-                        Ok(results) => {
-                            app.search_results = results;
-                            app.search_modal_active = true;
-                            app.search_selected_idx = 0;
-                            // Don't clear search_query - user should see what they searched
-                            app.state = AppState::Idle;
-                        }
-                        Err(e) => {
-                            app.error_message = Some(e.to_string());
-                            app.error_modal_visible = true;
-                            app.search_query.clear();
-                            app.state = AppState::Idle;
-                        }
-                    }
-                } else {
+            AppState::LoadingSearch if !app.search_pending => {
+                if app.search_query.is_empty() {
                     app.state = AppState::Idle;
+                } else {
+                    app.search_pending = true;
+                    let tx = tx.clone();
+                    let query = app.search_query.clone();
+                    tokio::spawn(async move {
+                        match with_retries(3, || async { api::geocoding::search(&query).await }).await
+                        {
+                            Ok(results) => {
+                                let _ = tx.send(Message::SearchResultsReceived(results));
+                            }
+                            Err(e) => {
+                                let _ = tx.send(Message::SearchError(e.to_string()));
+                            }
+                        }
+                    });
                 }
             }
-            AppState::LoadingWeather | AppState::Refreshing => {
-                app.state = AppState::Idle;
-                if let Some(loc) = app.location.clone() {
+            AppState::LoadingWeather | AppState::Refreshing if !app.weather_pending => {
+                if let Some(loc) = app.location.as_ref() {
+                    app.weather_pending = true;
+                    let tx = tx.clone();
                     let lat = loc.latitude;
                     let lon = loc.longitude;
-                    match with_retries(3, || async { api::weather::fetch(lat, lon).await }).await {
-                        Ok((current, hourly, daily)) => {
-                            app.location = Some(loc);
-                            app.current = Some(current);
-                            app.hourly = Some(hourly);
-                            app.daily = Some(daily);
-                            app.update(Message::WeatherFetched);
+                    tokio::spawn(async move {
+                        match with_retries(3, || async { api::weather::fetch(lat, lon).await }).await
+                        {
+                            Ok((current, hourly, daily)) => {
+                                let _ = tx.send(Message::WeatherFetchedBoxed(
+                                    current,
+                                    Box::new(hourly),
+                                    Box::new(daily),
+                                ));
+                            }
+                            Err(e) => {
+                                let _ = tx.send(Message::WeatherError(e.to_string()));
+                            }
                         }
-                        Err(e) => {
-                            app.update(Message::WeatherError(e.to_string()));
-                        }
-                    }
+                    });
+                } else {
+                    app.state = AppState::Idle;
+                    app.weather_pending = false;
                 }
             }
-            AppState::Idle => {}
+            _ => {}
         }
     }
 
     // Persist the current location on exit.
     if let Some(ref loc) = app.location {
-        let config = config::SavedConfig {
+        let cfg = config::SavedConfig {
             name: loc.name.clone(),
             refresh_interval: Some(app.auto_refresh_interval.as_secs()),
         };
         let base_dir = config::config_path();
-        if let Err(e) = config::save_config(&config, app.last_config_path.as_deref(), &base_dir) {
+        if let Err(e) = config::save_config(&cfg, app.last_config_path.as_deref(), &base_dir) {
             eprintln!("Failed to save config: {e}");
         }
     }
@@ -294,7 +314,7 @@ fn draw(area: Rect, app: &App, frame: &mut ratatui::Frame) {
         };
         format!(
             " Last: {} | {} | Ref: {} | Tab=cycles | S=search U=unit R=refresh Esc=clear Q=quit ",
-            &last_time, tab_display, refresh_display
+            last_time, tab_display, refresh_display
         )
     } else {
         " Press S to search for a location ".into()
@@ -395,7 +415,7 @@ fn tab_label(idx: usize) -> &'static str {
 }
 
 fn render_hourly_tab(app: &App, area: Rect, frame: &mut ratatui::Frame) {
-    let text = if let Some(ref hourly) = app.hourly {
+    let lines: Vec<Line> = if let Some(ref hourly) = app.hourly {
         // Find the starting index: first future or current hour in the location's timezone
         let start_idx = if let Some(ref loc) = app.location {
             let tz: Tz = loc.timezone.parse().unwrap_or(Tz::UTC);
@@ -432,7 +452,7 @@ fn render_hourly_tab(app: &App, area: Rect, frame: &mut ratatui::Frame) {
         let available = hourly.times.len().saturating_sub(start_idx);
         let count = std::cmp::min(max_data_rows, available);
 
-        let mut lines: Vec<String> = vec![format!("Next {} hours\n", count)];
+        let mut out: Vec<Line> = vec![Line::from(format!("Next {} hours", count))];
         for i in 0..count {
             let idx = start_idx + i;
             let time = &hourly.times[idx];
@@ -444,47 +464,40 @@ fn render_hourly_tab(app: &App, area: Rect, frame: &mut ratatui::Frame) {
             let temp = app.format_temp(hourly.temperatures[idx]);
             let wmo = WmoWeather::from(hourly.weather_codes[idx]);
             let is_day = hourly.is_day[idx];
-            let prec = format!("{:.1}mm", hourly.precipitations[idx]);
-            lines.push(format!(
-                "{} | {} {} | 💧{}\n",
-                Span::styled(&hour_str, Style::default().fg(Color::Yellow)),
+            let prec = format!("{:.1} mm", hourly.precipitations[idx]);
+            out.push(Line::from(vec![
+                Span::styled(hour_str, Style::default().fg(Color::Yellow)),
+                Span::raw(" | "),
                 Span::styled(
                     format!("{} {}", wmo.icon(is_day), temp),
-                    Style::default().fg(wmo.color())
+                    Style::default().fg(wmo.color()),
                 ),
-                "",
-                prec,
-            ));
+                Span::raw(" | "),
+                Span::styled(format!("💧 {prec}"), Style::default().fg(Color::Cyan)),
+            ]));
         }
-        lines.join("")
+        out
     } else if area.height > 1 && area.width > 0 {
-        "\nNo hourly data available.\n".into()
+        vec![Line::from(""), Line::from("No hourly data available.")]
     } else {
-        String::new()
+        Vec::new()
     };
 
-    if text.is_empty() {
+    if lines.is_empty() {
         return;
     }
 
-    frame.render_widget(Paragraph::new(text), area);
+    frame.render_widget(Paragraph::new(lines), area);
 }
 
 fn render_daily_tab(app: &App, area: Rect, frame: &mut ratatui::Frame) {
-    let text = if let Some(ref daily) = app.daily {
+    let lines: Vec<Line> = if let Some(ref daily) = app.daily {
         let count = std::cmp::min(daily.dates.len(), area.height.saturating_sub(2) as usize);
-        let mut all_temps: Vec<f32> = daily.temp_high.clone();
-        all_temps.extend(daily.temp_low.clone());
-        let mut lines: Vec<String> = vec![format!("{} day forecast\n\n", count)];
 
-        if let Some(ref h) = app.hourly {
-            for &t in &h.temperatures {
-                all_temps.push(t);
-            }
-        }
-        if let Some(ref cur) = app.current {
-            all_temps.push(cur.temperature);
-        }
+        let mut out: Vec<Line> = vec![
+            Line::from(format!("{count} day forecast")),
+            Line::from(""),
+        ];
 
         for i in 0..count {
             let day_name = day_of_week(&daily.dates[i]);
@@ -494,31 +507,35 @@ fn render_daily_tab(app: &App, area: Rect, frame: &mut ratatui::Frame) {
             let precip = format!("{:.1} mm", daily.precip_sum[i]);
             let wind = app.format_wind_speed(daily.wind_max[i]);
 
-            lines.push(format!(
-                "{} | {} | {} | {} | 💧 {} | 🌬️ {}\n",
+            out.push(Line::from(vec![
                 Span::styled(day_name, Style::default().fg(Color::Yellow)),
+                Span::raw(" | "),
                 Span::styled(app.format_temp(high), Style::default().fg(Color::Red)),
+                Span::raw(" | "),
                 Span::styled(app.format_temp(low), Style::default().fg(Color::Blue)),
+                Span::raw(" | "),
                 Span::styled(
                     format!("{} {}", wmo.icon(true), wmo.description()),
-                    Style::default().fg(wmo.color())
+                    Style::default().fg(wmo.color()),
                 ),
-                Span::styled(precip, Style::default().fg(Color::Cyan)),
-                Span::styled(wind, Style::default().fg(Color::White)),
-            ));
+                Span::raw(" | "),
+                Span::styled(format!("💧 {precip}"), Style::default().fg(Color::Cyan)),
+                Span::raw(" | "),
+                Span::styled(format!("🌬️ {wind}"), Style::default().fg(Color::White)),
+            ]));
         }
-        lines.join("")
+        out
     } else if area.height > 1 && area.width > 0 {
-        "\nNo daily data available.\n".into()
+        vec![Line::from(""), Line::from("No daily data available.")]
     } else {
-        String::new()
+        Vec::new()
     };
 
-    if text.is_empty() {
+    if lines.is_empty() {
         return;
     }
 
-    frame.render_widget(Paragraph::new(text), area);
+    frame.render_widget(Paragraph::new(lines), area);
 }
 
 fn render_search_modal(app: &App, area: Rect, frame: &mut ratatui::Frame) {
@@ -536,12 +553,14 @@ fn render_search_modal(app: &App, area: Rect, frame: &mut ratatui::Frame) {
     let y = (area.height.saturating_sub(modal_height)) / 2;
     let modal_area = Rect::new(x, y, modal_width, modal_height);
 
-    // Fill modal area with spaces on DarkGray to make it truly opaque (clears underlying content)
+    // Clear underlying content and paint an opaque DarkGray background.
+    // `Clear` zeroes the cells; `set_style` then applies the modal background
+    // across the whole area in one buffer pass — replacing a per-cell loop.
+    frame.render_widget(Clear, modal_area);
+    let bg_style = Style::default().bg(Color::DarkGray);
     for y in modal_area.top()..modal_area.bottom() {
         for x in modal_area.left()..modal_area.right() {
-            frame.buffer_mut()[(x, y)]
-                .set_char(' ')
-                .set_bg(Color::DarkGray);
+            frame.buffer_mut()[(x, y)].set_style(bg_style);
         }
     }
 
@@ -619,118 +638,6 @@ fn render_search_modal(app: &App, area: Rect, frame: &mut ratatui::Frame) {
     let full_text = content_lines;
     let content_para = Paragraph::new(full_text).style(Style::default().bg(Color::DarkGray));
     frame.render_widget(content_para, inner);
-}
-
-fn handle_key(app: &mut App, key: KeyEvent) -> bool {
-    // Handle search modal keys
-    if app.search_modal_active {
-        match key.code {
-            KeyCode::Esc => {
-                app.update(Message::SearchModal { active: false });
-                app.update(Message::SearchClear);
-                return false;
-            }
-            KeyCode::Enter => {
-                if !app.search_results.is_empty()
-                    && (app.search_selected_idx as usize) < app.search_results.len()
-                {
-                    let selected = app.search_results[app.search_selected_idx as usize].clone();
-                    app.search_modal_active = false;
-                    app.search_query.clear();
-                    app.search_results.clear();
-                    app.search_selected_idx = 0;
-                    app.location = Some(selected);
-                    app.state = AppState::LoadingWeather;
-                    return false;
-                }
-                if !app.search_query.is_empty() {
-                    app.state = AppState::LoadingSearch;
-                    return false;
-                }
-                return false;
-            }
-            KeyCode::Up | KeyCode::Char('k') => {
-                if app.search_selected_idx > 0 {
-                    app.search_selected_idx -= 1;
-                }
-                return false;
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                if app.search_selected_idx + 1 < app.search_results.len() as u16 {
-                    app.search_selected_idx += 1;
-                }
-                return false;
-            }
-            KeyCode::Char('u') if key.modifiers == KeyModifiers::CONTROL => {
-                app.search_query.clear();
-                return false;
-            }
-            KeyCode::Char(c) => {
-                app.search_query.push(c);
-                return false;
-            }
-            KeyCode::Backspace => {
-                app.search_query.pop();
-                return false;
-            }
-            _ => {}
-        }
-    }
-
-    let handled = match key.code {
-        KeyCode::Char('c') if key.modifiers == KeyModifiers::CONTROL => {
-            app.is_quit = true;
-            true
-        }
-        KeyCode::Char('q') => {
-            app.is_quit = true;
-            true
-        }
-        KeyCode::Esc => {
-            if app.search_modal_active {
-                app.update(Message::SearchModal { active: false });
-                app.update(Message::SearchClear);
-                true
-            } else if app.error_modal_visible {
-                app.error_modal_visible = false;
-                app.error_message = None;
-                true
-            } else if app.error_message.is_some() {
-                app.error_message = None;
-                true
-            } else {
-                false
-            }
-        }
-        KeyCode::Char('s') | KeyCode::Char('S') => {
-            app.search_query.clear();
-            app.search_results.clear();
-            app.search_selected_idx = 0;
-            app.state = AppState::Idle;
-            app.update(Message::SearchModal { active: true });
-            true
-        }
-        KeyCode::Char('u') | KeyCode::Char('U') => {
-            app.update(Message::ToggleUnit);
-            true
-        }
-        KeyCode::Char('r') | KeyCode::Char('R') => {
-            if app.location.is_some() {
-                app.state = AppState::Refreshing;
-            }
-            true
-        }
-        KeyCode::Tab => {
-            app.active_tab = 1 - app.active_tab;
-            true
-        }
-        _ => false,
-    };
-
-    if handled {
-        app.update(Message::Key(key));
-    }
-    handled
 }
 
 fn day_of_week(date_str: &str) -> String {

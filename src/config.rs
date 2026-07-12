@@ -1,16 +1,20 @@
 //! Configuration persistence module.
 //!
 //! Loads and saves the last-used location name across app sessions.
-//! Check order: `~/.config/weatherman/weatherman.toml` first, then `./weatherman.toml`.
+//! Check order: the platform config directory first, then `./weatherman.toml`.
 //! Write targets the path that was read at startup; if neither existed, defaults to config dir.
+//!
+//! The platform config directory is resolved with the `dirs` crate so the
+//! feature works on Windows (`%APPDATA%\weatherman\`), macOS
+//! (`~/Library/Application Support/weatherman/`), and Linux
+//! (`$XDG_CONFIG_HOME/weatherman/` or `~/.config/weatherman/`). The old
+//! `HOME`-only lookup broke persistence on Windows because `HOME` is rarely
+//! set outside Unix-like shells.
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 const CONFIG_FILE_NAME: &str = "weatherman.toml";
-
-/// The filename used for the persisted config file.
-const _CONFIG_FILE_NAME: &str = CONFIG_FILE_NAME;
 
 /// The last-used location name and refresh interval.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,12 +23,17 @@ pub struct SavedConfig {
     pub refresh_interval: Option<u64>,
 }
 
-/// Return the default config directory path: `~/.config/weatherman`.
+/// Return the default config directory path for the current platform.
+///
+/// Uses the `dirs` crate: `%APPDATA%\weatherman` on Windows,
+/// `~/Library/Application Support/weatherman` on macOS, and
+/// `$XDG_CONFIG_HOME/weatherman` (or `~/.config/weatherman`) on Linux.
+/// Falls back to `./weatherman` if `dirs` cannot resolve a home directory
+/// (extremely rare — e.g. running without a user profile).
 pub fn config_path() -> PathBuf {
-    let home = std::env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("."));
-    home.join(".config").join("weatherman")
+    dirs::config_dir()
+        .map(|c| c.join("weatherman"))
+        .unwrap_or_else(|| PathBuf::from(".").join("weatherman"))
 }
 
 /// Internal helper to load config from a specific config directory path.
@@ -47,15 +56,12 @@ fn do_load_config(config_dir: &Path) -> Option<(SavedConfig, PathBuf)> {
     None
 }
 
-/// Load the saved config from the default location (`~/.config/weatherman/`).
+/// Load the saved config from the default platform location.
 ///
 /// Checks the config directory first, then the working directory.
 /// Returns the config along with the path it was loaded from.
 pub fn load_config() -> Option<(SavedConfig, PathBuf)> {
-    let home = std::env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("."));
-    let config_dir = home.join(".config").join("weatherman");
+    let config_dir = config_path();
     do_load_config(&config_dir)
 }
 

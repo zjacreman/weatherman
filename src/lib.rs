@@ -4,7 +4,7 @@
 //! app state, temperature unit, messages) and the formatting helpers so that
 //! downstream code and integration tests can exercise the business logic.
 //!
-//! See `api::weather::WeatherResponse` and `api::geocoding::GeocodingResult` for
+//! See `api::weather::TestWeatherResponse` and `api::geocoding::GeocodingResult` for
 //! the deserializable response types and conversion helpers.
 
 pub mod api;
@@ -21,7 +21,7 @@ pub use config::SavedConfig;
 pub use ratatui::style::Color;
 
 // Re-export ui helpers for testing
-pub use ui::helpers::{format_wind_full, progress_bar, format_pressure_trend};
+pub use ui::helpers::{format_wind_deg, format_wind_full, progress_bar, format_pressure_trend};
 
 // Re-export CurrentWidget so crate consumers can use it
 pub use ui::CurrentWidget;

@@ -94,13 +94,13 @@ Key press → Message enum → App::update() → internal state change
                                            ↓
                               API fetch (reqwest) → deserialized models
                                            ↓
-                              Message::WeatherFetched / SearchResultsReceived
+                              Message::WeatherFetchedBoxed / SearchResultsReceived
                                            ↓
                               Terminal draw cycle (ratatui)
 ```
 
 1. The `App` struct holds all state. It uses a simplified **Elm Architecture** (`update` / `view`).
-2. When the user triggers a search or refresh, an async task calls the Open-Meteo API.
+2. When the user triggers a search or refresh, a spawned async task calls the Open-Meteo API and reports back over an `mpsc` channel. The UI stays responsive during slow network calls; `q`/`Ctrl+C` always work.
 3. Responses are deserialized with `serde` into domain models (`Location`, `CurrentWeather`, `HourlyForecast`, `DailyForecast`).
 4. The main loop receives the result via a `Message` and mutates state.
 5. `terminal.draw()` calls a pure function that renders the current state using ratatui widgets.
@@ -170,13 +170,13 @@ weatherman/
 | Refresh interval | 7200s (2h) | Configurable in `weatherman.toml` as `refresh_interval` |
 | Tick rate | 1000ms | Terminal redraw rate |
 | Search count | 10 | Results per geocoding query |
-| Saved location | `~/.config/weatherman/weatherman.toml` | Last-used city name (checks config dir then cwd) |
+| Saved location | `<config dir>/weatherman/weatherman.toml` | Last-used city name (checks config dir then cwd). Config dir is platform-aware via the `dirs` crate. |
 
 ## Location Persistence
 
 Weatherman remembers your last-used location across sessions using a TOML config file:
 
-1. **Read order**: `~/.config/weatherman/weatherman.toml` (config dir) → `./weatherman.toml` (cwd)
+1. **Read order**: `<config dir>/weatherman/weatherman.toml` (platform config dir via the `dirs` crate) → `./weatherman.toml` (cwd)
 2. **Write target**: The path that was read at startup; defaults to config dir if neither existed
 3. **Format**:
 
@@ -212,9 +212,9 @@ cargo clippy
 ## Bug Fixes
 
 #### v0.1.7 — Location Persistence
-- **Added: Persistent location across sessions** — App now saves the current location to `~/.config/weatherman/weatherman.toml` (or `./weatherman.toml`) on exit and auto-loads it on startup. Writes to the same path that was read at startup; defaults to config dir if neither existed.
-- **Added: Config module** (`src/config.rs`) with `load_config()` and `save_config()` functions using the `toml` crate.
-- **Added: Auto-load weather on startup** — If a saved location exists, the app searches for it and fetches weather automatically before entering the event loop.
+- **Added: Persistent location across sessions** — App now saves the current location to `<config dir>/weatherman/weatherman.toml` (platform config dir via the `dirs` crate; or `./weatherman.toml`) on exit and auto-loads it on startup. Writes to the same path that was read at startup; defaults to config dir if neither existed.
+- **Added: Config module** (`src/config.rs`) with `load_config()` and `save_config()` functions using the `toml` crate. Cross-platform config resolution via the `dirs` crate (Windows `%APPDATA%`, macOS `~/Library/Application Support`, Linux `$XDG_CONFIG_HOME`).
+- **Added: Auto-load weather on startup** — If a saved location exists, the app spawns a geocoding search task and fetches weather automatically without blocking the UI.
 
 #### v0.2.0 — Sprint 2: Architecture Cleanup & Test Coverage
 - **Arch: Unified deserialization types** — Removed duplicate `weather_api` module from `lib.rs`. `WeatherResponse`, `CurrentData`, `HourlyData`, `DailyData`, and `GeocodingResult` are now defined once in the `api/` crate and re-exported. The `GeocodingResult::from()` impl lives alongside the struct in `api/geocoding.rs`. Tests use `api/` types via crate root re-exports.
@@ -222,7 +222,7 @@ cargo clippy
 - **Fix: Startup geocoding failure now surfaces an error** — Previously a failed geocoding search on startup silently produced a blank screen. Now the error modal displays "Location 'X' not found" or "Failed to search for location: X" to inform the user.
 - **Test: Safe config directory tests** — Fixed config persistence tests that used `std::env::set_var("HOME", ...)` which could overwrite the user's real config. All config tests now use temp directories with `load_config_from_dir()` / `save_config_to_dir()`.
 - **Test: New `api/client.rs` tests** — 6 tests for `encode_query()`, `geocoding_url()`, and `forecast_url()` covering ASCII passthrough, space encoding, unicode encoding, and full URL format verification.
-- **Test: New `App::update` state machine tests** — 7 tests for `SearchClear`, `SearchInput`, `WeatherFetched`, `SearchError`, `WeatherError`, `ToggleUnit`, and `show_error()` transitions.
+- **Test: New `App::update` state machine tests** — tests for `SearchClear`, `SearchInput`, `WeatherFetchedBoxed`, `SearchError`, `WeatherError`, `AutoSearchResult`, `ToggleUnit`, and `show_error()` transitions.
 - **UX: Improved search modal instructions** — No-results state shows "Type a location name, then press Enter to search" and "Ctrl+U=clear · Esc=close". With-results state shows "Enter=select · Up/down=nav · Esc=close" for clarity.
 
 #### v0.1.5 — Tab System Simplification

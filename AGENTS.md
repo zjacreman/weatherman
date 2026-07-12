@@ -26,11 +26,13 @@ cargo clippy -- -D warnings
 - **Language**: Rust 2021 Edition
 - **TUI Framework**: [ratatui 0.30](https://ratatui.rs) — the maintained fork of tui-rs
 - **Terminal I/O**: [crossterm 0.29](https://github.com/crossterm-rs/crossterm)
-- **Async Runtime**: [tokio 1](https://tokio.rs) (full features)
+- **Async Runtime**: [tokio 1](https://tokio.rs) (selected features: `rt-multi-thread`, `macros`, `time`, `io-util`, `net`, `sync`)
 - **HTTP Client**: [reqwest 0.12](https://docs.rs/reqwest)
 - **Serialization**: [serde 1](https://serde.rs) + [serde_json 1](https://docs.rs/serde_json)
 - **Date/Time**: [chrono 0.4](https://docs.rs/chrono) with serde feature
 - **Config**: [toml 0.8](https://docs.rs/toml) for persisted location config
+- **Config dir resolution**: [dirs 5](https://docs.rs/dirs) for cross-platform config path (Windows `%APPDATA%`, macOS `~/Library/Application Support`, Linux `$XDG_CONFIG_HOME`)
+- **Display width**: [unicode-width 0.2](https://docs.rs/unicode-width) (main dep) for correct wrapping of multi-byte text and emoji alignment
 
 ### Elm Architecture
 
@@ -41,7 +43,7 @@ The app follows a simplified Elm Architecture:
 3. **Update** — `App::update(&mut self, msg: Message)` is the pure-ish mutation function.
 4. **View** — `draw()` in `main.rs` renders the current `App` state to the terminal.
 
-The event loop in `main.rs` combines keyboard input, async API tasks, and the tick-based auto-refresh.
+The event loop in `main.rs` receives `Message`s on a `tokio::sync::mpsc` channel — keyboard events (from a `spawn_blocking` crossterm reader), ticks (from a `tokio::time::interval`), and async API results (from spawned fetch/search tasks) all flow through the same channel. The main task never runs HTTP calls inline, so the UI stays responsive during network outages and `q`/`Ctrl+C` always work.
 
 ### Data Flow
 
@@ -121,9 +123,9 @@ struct GeocodingResult {
 GET https://api.open-meteo.com/v1/forecast?latitude=<lat>&longitude=<lon>&current=<fields>&hourly=<fields>&daily=<fields>&timezone=auto&temperature_unit=celsius
 ```
 
-**Current fields**: `temperature_2m`, `relative_humidity_2m`, `apparent_temperature`, `precipitation`, `weather_code`, `wind_speed_10m`, `wind_direction_10m`, `wind_gusts_10m`, `is_day`
+**Current fields**: `temperature_2m`, `relative_humidity_2m`, `apparent_temperature`, `precipitation`, `weather_code`, `wind_speed_10m`, `wind_direction_10m`, `wind_gusts_10m`, `is_day`, `pressure_msl`, `uv_index`, `visibility`, `dew_point_2m`
 
-**Hourly fields**: `temperature_2m`, `relative_humidity_2m`, `apparent_temperature`, `weather_code`, `precipitation`, `wind_speed_10m`, `is_day`
+**Hourly fields**: `temperature_2m`, `relative_humidity_2m`, `apparent_temperature`, `weather_code`, `precipitation`, `wind_speed_10m`, `is_day`, `pressure_msl`
 
 **Daily fields**: `weather_code`, `temperature_2m_max`, `temperature_2m_min`, `sunrise`, `sunset`, `precipitation_sum`, `wind_speed_10m_max`
 
@@ -138,7 +140,10 @@ pub struct SavedConfig {
 }
 ```
 
-- **Read order**: `~/.config/weatherman/weatherman.toml` (config dir) → `./weatherman.toml` (cwd)
+- **Read order**: `<config dir>/weatherman/weatherman.toml` (platform config dir via the `dirs` crate) → `./weatherman.toml` (cwd)
+  - Windows: `%APPDATA%\weatherman\weatherman.toml`
+  - macOS: `~/Library/Application Support/weatherman/weatherman.toml`
+  - Linux: `$XDG_CONFIG_HOME/weatherman/weatherman.toml` (or `~/.config/weatherman/weatherman.toml`)
 - **Write target**: The path read at startup; defaults to config dir if neither existed
 - **Format**:
 ```toml
@@ -146,13 +151,13 @@ name = "New York"
 refresh_interval = 7200
 ```
 
-On startup, `App::new()` loads the saved config and sets `pending_auto_search`. The event loop in `main.rs` performs a geocoding search and auto-fetches weather before the event loop begins. On exit, `run_app()` writes the current location and refresh interval back to the same config file.
+On startup, `App::new()` loads the saved config and sets `pending_auto_search`. `run_app()` spawns a geocoding search task that returns `Message::AutoSearchResult`; on success that sets `app.state = LoadingWeather` so the event loop spawns the weather fetch. On exit, `run_app()` writes the current location and refresh interval back to the same config file.
 
 ### WMO Weather Code Mapping (from `app.rs`)
 
 | Code(s)      | Condition               | Icon                          |
 |------------- | ----------------------- | ----------------------------- |
-| 0            | Clear Sky              | ☀️ (day) / 🌙 (night)         |
+| 0            | Clear Sky              | 🌞 (day) / 🌙 (night)         |
 | is_day (current) | f64 (0.0 or 1.0) | N/A | Not a weather code        |
 | 1            | Mainly Clear           | 🌤️ (day) / 🌚 (night)         |
 | 2            | Partly Cloudy          | ⛅                            |
@@ -195,20 +200,15 @@ Without `saturating_sub`, elapsed times exceeding 1000ms (common during slow net
 
 ---
 
-### Async Event Loop
+### Async Event Loop (original)
 
-The main loop in `main.rs` interleaves:
-
-1. **Terminal draw** — `terminal.draw(|frame| ...)` each tick.
-2. **Crossterm event poll** — blocks up to 1000ms waiting for a key.
-3. **Key handling** — `handle_key()` returns bool for handled/unhandled.
-4. **State-based async dispatch** — based on `AppState` enum, launches API tasks via `async move {}`.
+The main loop in `main.rs` interleaves terminal draw, message receipt, and async dispatch. See the channel-driven design below in the "Async Event Loop" Development Notes section.
 
 **To add a new async operation**: Create a new `AppState` variant, add a `Message` variant, and dispatch the task in the match arm.
 
 ### Keyboard Handling
 
-- `handle_key()` in `main.rs` matches `KeyEvent` variants.
+- `App::handle_key()` in `app.rs` matches `KeyEvent` variants. It is reachable from integration tests via the `weatherman` library crate.
 - Use `KeyCode::Char('c')` and `KeyModifiers::CONTROL` for modifier combos.
 
 **Outside search modal:**
@@ -235,7 +235,7 @@ The `last_update` field stores time as `HH:MM:SS` in the system's local timezone
 
 1. Add the field to the `#[derive(Deserialize)]` struct in `api/weather.rs` or `api/geocoding.rs`.
 2. Update the domain model in `app.rs` (e.g., `CurrentWeather`, `HourlyForecast`) as needed.
-3. If the field is added to a fetch struct (with `Option<>`), update `into_models()` in the same file.
+3. If the field is added to a fetch struct (with `Option<>`), update `extract_models()` in the same file.
 4. Add the field to the corresponding `TestXXX` struct (non-Option variant) in `api/weather.rs` if exposed for tests.
 5. Update the `From<TestXXX>` impl if converting between types.
 6. Update `lib.rs` re-exports in the `weather_api` comment if a new type is exposed.
@@ -259,7 +259,18 @@ All tests are in `tests/unit_tests.rs`. They exercise:
 - **Weather deserialization**: Parse current/hourly/daily forecast responses.
 - **Message**: Construct all variants, verify `Clone`.
 - **TempUnit**: `toggle()` roundtrip, `symbol()` values.
-- **App state machine**: `new()` defaults, `WeatherFetched`, `ToggleUnit`.
+### Async Event Loop
+
+The main loop in `main.rs` is message-driven via a `tokio::sync::mpsc::unbounded_channel::<Message>`:
+
+1. **Keyboard listener** — a `spawn_blocking` task polls crossterm and forwards `Message::Key(KeyEvent)`.
+2. **Tick timer** — a `tokio::spawn` task emits `Message::Tick` every 1000ms.
+3. **API tasks** — fetch/search run as `tokio::spawn`'d tasks and reply with `Message::SearchResultsReceived`, `Message::SearchError`, `Message::WeatherFetchedBoxed`, `Message::WeatherError`, or `Message::AutoSearchResult`.
+4. **Main loop** — awaits the next `Message`, calls `App::update(msg)`, draws, then spawns any async work the new `AppState` implies. In-flight guards (`search_pending`/`weather_pending`) prevent duplicate task spawns.
+
+Because no HTTP call lives on the main task, the terminal, `q`, and `Ctrl+C` stay responsive during slow/flaky networks.
+
+**To add a new async operation**: Create a new `AppState` variant, add a `Message` variant carrying the result, and dispatch the task in the match arm of the main loop.
 - **ui::helpers**: Standalone `progress_bar` and `format_wind_full` tests.
 - **Search modal**: Modal open/close toggling, search state reset on clear.
 - **Tick timeout overflow** — 6 tests verifying `saturating_sub` behavior prevents unsigned integer overflow at normal, zero, exact-equals, and extreme elapsed times.
@@ -271,7 +282,7 @@ All tests are in `tests/unit_tests.rs`. They exercise:
 - **Config persistence (live)** — 3 tests for save/load roundtrip, parent directory creation, and None-on-missing-file
 - **Config refresh_interval** - tests for `SavedConfig` serialization/deserialization with and without `refresh_interval`, and default value verification
 - **api/client.rs** - 6 tests for `encode_query()` (ASCII passthrough, space encoding, unicode encoding), `geocoding_url()` (format + encoding), and `forecast_url()` (format verification with required params)
-- **App::update** - 7 tests for `SearchClear`, `SearchInput`, `WeatherFetched`, `SearchError`, `WeatherError`, `ToggleUnit`, and `show_error()` state transitions
+- **App::update** - state-machine tests for `SearchClear`, `SearchInput`, `SearchResultsReceived`, `WeatherFetchedBoxed`, `SearchError`, `WeatherError`, `AutoSearchResult`, `ToggleUnit`, and `show_error()` transitions, including in-flight guard (`search_pending`/`weather_pending`) resets
 - **Config persistence (safe)** - tests use `load_config_from_dir()` / `save_config_to_dir()` with temp directories instead of `HOME` env var manipulation
 
 ### Adding New Tests
@@ -290,15 +301,25 @@ All tests are in `tests/unit_tests.rs`. They exercise:
 
 ### New Test Patterns
 
-- **`quit_key_sets_is_quit`** — verifies 'q' key sets quit flag
-- **`ctrl_c_sets_is_quit`** — verifies Ctrl+C also sets quit flag
-- **`search_modal_open_and_close()`** — verifies modal toggling
-- **`clear_search_resets_all()`** — verifies search state is fully reset on clear
-- **`deserialize_runtime_weather_response_with_options`** — verifies Option-wrapped deserialization from api/weather.rs
-- **`deserialize_geocoding_envelope`** — verifies correct "results" (plural) field name
-- **WMO weather code coverage** — tests for all untested WMO variants (codes 1, 48, 56, 66, 77, 80, 85)
-- **Tab key cycling** — verifies Tab toggles between Daily and Hourly tabs
-- **`daily_is_default_tab`** — verifies default `active_tab` is 0 (Daily)
+- **`quit_key_sets_is_quit`** - verifies 'q' key sets quit flag
+- **`ctrl_c_sets_is_quit`** - verifies Ctrl+C also sets quit flag
+- **`s_key_opens_search_modal`** - verifies 's' opens the search modal
+- **`esc_closes_search_modal`** - verifies Esc closes modal and clears query
+- **`search_modal_typing_appends_to_query`** - verifies typed chars append to query
+- **`tab_key_cycles_between_daily_and_hourly`** - verifies Tab toggles between Daily and Hourly tabs
+- **`u_key_toggles_unit`** - verifies 'u'/'U' toggles temperature unit
+- **`r_key_triggers_refresh_when_location_set`** - verifies 'r' only refreshes when a location is set
+- **`ctrl_u_clears_search_query`** - verifies Ctrl+U clears the query
+- **`handle_key_unrecognized_returns_false`** - verifies unhandled keys return false
+- **Wind speed conversion** - `convert_wind_speed_celsius_preserves_kmh` (regression: km/h must NOT be scaled in Celsius mode), `convert_wind_speed_fahrenheit_converts_to_mph`, `format_wind_speed_zero`
+- **Pressure trend anchoring** - `pressure_trend_anchors_on_current_time_not_array_end` (regression: anchors on `current.time`, not array end), `pressure_trend_falling_anchors_on_current_time`, `pressure_trend_steady_when_diff_under_threshold`, `pressure_trend_none_without_enough_history`, `pressure_trend_none_without_pressures`
+- **Search error modal** - `search_error_closes_search_modal_and_clears_results` (regression: error no longer leaves stale results / open modal)
+- **Auto-search** - `auto_search_result_sets_location_and_triggers_weather_fetch`, `auto_search_result_not_found_shows_error`
+- **`weather_fetched_boxed_populates_and_clears_pending`** - verifies data is stored and `weather_pending` is reset
+- **`deserialize_runtime_weather_response_with_options`** - verifies Option-wrapped deserialization from api/weather.rs
+- **`deserialize_geocoding_envelope`** - verifies correct "results" (plural) field name
+- **WMO weather code coverage** - tests for all untested WMO variants (codes 1, 48, 56, 66, 77, 80, 85)
+- **`daily_is_default_tab`** - verifies default `active_tab` is 0 (Daily)
 - **Tick timeout overflow tests remain unchanged: `tick_timeout_saturating_sub_*` (6 tests)**
 - **format_temp rendering** — 3 tests verifying format_temp produces exactly one ° symbol in positive (single +), negative (no +), and zero cases
 - **saturating_sub pattern** — 1 test verifying the pattern prevents subtraction underflow at zero/one/two heights
