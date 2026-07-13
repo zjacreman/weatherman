@@ -33,6 +33,7 @@ cargo clippy -- -D warnings
 - **Config**: [toml 0.8](https://docs.rs/toml) for persisted location config
 - **Config dir resolution**: [dirs 5](https://docs.rs/dirs) for cross-platform config path (Windows `%APPDATA%`, macOS `~/Library/Application Support`, Linux `$XDG_CONFIG_HOME`)
 - **Display width**: [unicode-width 0.2](https://docs.rs/unicode-width) (main dep) for correct wrapping of multi-byte text and emoji alignment
+- **Logging**: [tracing 0.1](https://docs.rs/tracing) + [tracing-subscriber 0.3](https://docs.rs/tracing-subscriber) with env-filter for structured logs to stderr
 
 ### Elm Architecture
 
@@ -41,7 +42,7 @@ The app follows a simplified Elm Architecture:
 1. **Model** — `App` struct in `app.rs` holds all state (location, weather data, UI state).
 2. **Messages** — `Message` enum represents every state transition trigger (key press, API result, tick).
 3. **Update** — `App::update(&mut self, msg: Message)` is the pure-ish mutation function.
-4. **View** — `draw()` in `main.rs` renders the current `App` state to the terminal.
+4. **View** — `draw()` in `ui/views.rs` renders the current `App` state to the terminal.
 
 The event loop in `main.rs` receives `Message`s on a `tokio::sync::mpsc` channel — keyboard events (from a `spawn_blocking` crossterm reader), ticks (from a `tokio::time::interval`), and async API results (from spawned fetch/search tasks) all flow through the same channel. The main task never runs HTTP calls inline, so the UI stays responsive during network outages and `q`/`Ctrl+C` always work.
 
@@ -56,7 +57,7 @@ App::update(msg)
     →
 State mutation (last_update in local HH:MM:SS, search_results, error_message, etc.)
     →
-terminal.draw(|frame| draw(frame.area(), &app, frame))
+terminal.draw(|frame| ui::draw(frame.area(), &app, frame))
     →
 ratatui rendering via widgets
 ```
@@ -66,11 +67,10 @@ ratatui rendering via widgets
 ```
 weatherman/
 ├── Cargo.toml
-├── rust-toolchain.toml
 ├── src/
-│   ├── main.rs              # Binary entry, event loop, key handling, drawing
+│   ├── main.rs              # Binary entry, terminal setup, event loop, async dispatch
 │   ├── lib.rs                # Library root — re-exports domain and API types
-│   ├── app.rs               # Core domain: App, Message, WmoWeather, models
+│   ├── app.rs               # Core domain: App, Message, WmoWeather, models, AppError
 │   ├── config.rs            # Persisted location loading/saving (test-safe dir override)
 │   ├── api/
 │   │   ├── mod.rs           # Module re-exports
@@ -80,6 +80,7 @@ weatherman/
 │   └── ui/
 │       ├── mod.rs           # Sub-module re-exports
 │       ├── helpers.rs       # format_temp, format_wind_deg, progress_bar
+│       ├── views.rs         # Top-level draw() and tab/modal render helpers
 │       └── widgets/         # Ratatui widget components
 │           ├── mod.rs
 │           ├── current.rs
