@@ -616,7 +616,7 @@ fn render_search_modal(app: &App, area: Rect, frame: &mut ratatui::Frame) {
         content_lines.push(Line::from(Span::styled(" ", bg)));
         content_lines.push(Line::from(Span::styled(
             " Enter=select · Up/down=nav · Esc=close ",
-            Style::default().fg(Color::DarkGray).bg(Color::DarkGray),
+            Style::default().fg(Color::Gray).bg(Color::DarkGray),
         )));
     } else {
         content_lines.push(Line::from(Span::styled(
@@ -626,11 +626,11 @@ fn render_search_modal(app: &App, area: Rect, frame: &mut ratatui::Frame) {
         content_lines.push(Line::from(Span::styled(" ", bg)));
         content_lines.push(Line::from(Span::styled(
             " Type a location name, then press Enter to search ",
-            Style::default().fg(Color::DarkGray).bg(Color::DarkGray),
+            Style::default().fg(Color::Gray).bg(Color::DarkGray),
         )));
         content_lines.push(Line::from(Span::styled(
             " Ctrl+U=clear · Esc=close ",
-            Style::default().fg(Color::DarkGray).bg(Color::DarkGray),
+            Style::default().fg(Color::Gray).bg(Color::DarkGray),
         )));
     }
 
