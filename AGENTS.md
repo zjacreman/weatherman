@@ -233,19 +233,17 @@ The `last_update` field stores time as `HH:MM:SS` in the system's local timezone
 
 ### Adding a New API Field
 
-1. Add the field to the `#[derive(Deserialize)]` struct in `api/weather.rs` or `api/geocoding.rs`.
+1. Add the field to the public `#[derive(Deserialize)]` struct in `api/weather.rs` or `api/geocoding.rs`.
 2. Update the domain model in `app.rs` (e.g., `CurrentWeather`, `HourlyForecast`) as needed.
-3. If the field is added to a fetch struct (with `Option<>`), update `extract_models()` in the same file.
-4. Add the field to the corresponding `TestXXX` struct (non-Option variant) in `api/weather.rs` if exposed for tests.
-5. Update the `From<TestXXX>` impl if converting between types.
-6. Update `lib.rs` re-exports in the `weather_api` comment if a new type is exposed.
-7. Pass through to the widget/display layer as needed.
+3. Update the `TryFrom<WeatherResponse>` impl in `api/weather.rs` to map the new field.
+4. Update `lib.rs` re-exports if a new type is exposed.
+5. Pass through to the widget/display layer as needed.
 
 ### Status Bar / Footer
 
 The bottom status bar displays the `last_update` time in `HH:MM:SS` format in the system's local timezone (no timezone suffix). Time is produced using `chrono::Local`.
 
-**Important**: `is_day` from Open-Meteo is returned as `f64` (0.0 or 1.0), NOT as a boolean. You MUST change the deserialization struct field to `f64` and convert it to bool with `!= 0.0` in the From impl.
+**Important**: `is_day` from Open-Meteo is returned as `f64` (0.0 or 1.0), NOT as a boolean. You MUST change the deserialization struct field to `f64` and convert it to bool with `!= 0.0` in the `TryFrom` impl.
 
 ## Testing Approach
 

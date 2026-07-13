@@ -421,19 +421,23 @@ fn deserialize_weather_response() {
     let response: WeatherResponse = serde_json::from_str(json).expect("should parse");
 
     // Verify deserialization first
-    assert_eq!(response.current.time, "2026-05-10T14:00");
-    assert!((response.current.temperature_2m - 22.5).abs() < 1e-3);
-    assert_eq!(response.current.relative_humidity_2m, 45);
-    assert!((response.current.apparent_temperature - 21.8).abs() < 1e-3);
-    assert!((response.current.is_day - 1.0).abs() < f64::EPSILON);
+    let current_data = response.current.as_ref().expect("should have current");
+    assert_eq!(current_data.time, "2026-05-10T14:00");
+    assert!((current_data.temperature_2m - 22.5).abs() < 1e-3);
+    assert_eq!(current_data.relative_humidity_2m, 45);
+    assert!((current_data.apparent_temperature - 21.8).abs() < 1e-3);
+    assert!((current_data.is_day - 1.0).abs() < f64::EPSILON);
 
-    assert_eq!(response.hourly.time.len(), 4);
-    assert_eq!(response.hourly.temperature_2m.len(), 4);
-    assert_eq!(response.daily.time.len(), 2);
-    assert_eq!(response.daily.temperature_2m_max.len(), 2);
+    let hourly_data = response.hourly.as_ref().expect("should have hourly");
+    assert_eq!(hourly_data.time.len(), 4);
+    assert_eq!(hourly_data.temperature_2m.len(), 4);
+    let daily_data = response.daily.as_ref().expect("should have daily");
+    assert_eq!(daily_data.time.len(), 2);
+    assert_eq!(daily_data.temperature_2m_max.len(), 2);
 
     // Convert to domain models
-    let (current, hourly, daily) = response.into();
+    let (current, hourly, daily): (CurrentWeather, HourlyForecast, DailyForecast) =
+        response.try_into().expect("should convert");
 
     // === Current ===
     assert_eq!(current.time, "2026-05-10T14:00");
@@ -534,10 +538,12 @@ fn deserialize_weather_response_is_day_as_number() {
     let response: WeatherResponse = serde_json::from_str(json).expect("should parse");
 
     // Verify is_day deserializes as 0.0 (night)
-    assert!((response.current.is_day - 0.0).abs() < f64::EPSILON);
+    let current_data = response.current.as_ref().expect("should have current");
+    assert!((current_data.is_day - 0.0).abs() < f64::EPSILON);
 
     // Convert to domain models and verify is_day becomes false
-    let (current, hourly, _daily) = response.into();
+    let (current, hourly, _daily): (CurrentWeather, HourlyForecast, DailyForecast) =
+        response.try_into().expect("should convert");
     assert!(!current.is_day);
 
     // Verify null fields deserialize to None
@@ -550,7 +556,8 @@ fn deserialize_weather_response_is_day_as_number() {
 
 #[test]
 fn deserialize_runtime_weather_response_with_options() {
-    // This matches what api/weather.rs struct expects (all Option<T>)
+    // The unified WeatherResponse uses Option<T> for top-level sections,
+    // matching the runtime API output.
     let json = r#"{
       "current": {
         "time": "2026-05-10T14:00",
@@ -590,22 +597,12 @@ fn deserialize_runtime_weather_response_with_options() {
       }
     }"#;
 
-    // Use runtime Option-wrapped types from api/weather.rs
-    #[derive(serde::Deserialize)]
-    struct RuntimeResponse {
-        current: Option<weatherman::CurrentData>,
-        hourly: Option<weatherman::HourlyData>,
-        daily: Option<weatherman::DailyData>,
-    }
-
-    let resp: RuntimeResponse = serde_json::from_str(json).expect("should parse runtime response");
+    let resp: WeatherResponse = serde_json::from_str(json).expect("should parse runtime response");
     assert!(resp.current.is_some());
     assert!(resp.hourly.is_some());
     assert!(resp.daily.is_some());
 
-    // Convert using runtime types' From impl
-    let runtime_resp = resp;
-    let c = runtime_resp.current.expect("should have current");
+    let c = resp.current.expect("should have current");
     assert!((c.temperature_2m - 22.5).abs() < 1e-3);
     assert!((c.is_day - 1.0).abs() < f64::EPSILON);
     // The boolean check: 1.0 != 0.0 → true

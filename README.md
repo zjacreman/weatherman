@@ -137,7 +137,7 @@ weatherman/
 │   │   ├── mod.rs           # Module layout
 │   │   ├── client.rs        # reqwest HTTP client, URL builders, query encoding
 │   │   ├── geocoding.rs     # Open-Meteo geocoding search + GeocodingResult
-│   │   └── weather.rs       # Open-Meteo forecast fetch + deserialization + TestWeatherResponse
+│   │   └── weather.rs       # Open-Meteo forecast fetch + deserialization + WeatherResponse
 │   └── ui/
 │       ├── mod.rs           # Sub-module re-exports
 │       ├── helpers.rs       # format_temp, format_wind_deg, progress_bar
@@ -153,7 +153,7 @@ weatherman/
 ### Key Modules
 
 - **`app.rs`** — The heart of the app. Contains the Elm-architecture `update` method, data models (`Location`, `CurrentWeather`, `HourlyForecast`, `DailyForecast`), the `WmoWeather` enum with icon/color/description, and the `TempUnit` enum.
-- **`api/`** — Thin wrappers over Open-Meteo endpoints. Handles URL building, HTTP requests, and `serde` deserialization. `weather.rs` also provides `TestWeatherResponse` (a non-Option variant) and `From` impls for test deserialization and conversion. All API types have a single source of truth — no duplicate structs.
+- **`api/`** — Thin wrappers over Open-Meteo endpoints. Handles URL building, HTTP requests, and `serde` deserialization. `weather.rs` provides a single `WeatherResponse` type and a `TryFrom` impl for conversion to domain models. All API types have a single source of truth — no duplicate structs.
 - **`config.rs`** — Configuration persistence with test-safe directory override via `load_config_from_dir()` and `save_config_to_dir()` to avoid the user's real config during tests.
 - **`ui/`** — Ratatui widget components and layout helpers.
 

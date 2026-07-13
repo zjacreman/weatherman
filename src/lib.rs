@@ -4,7 +4,7 @@
 //! app state, temperature unit, messages) and the formatting helpers so that
 //! downstream code and integration tests can exercise the business logic.
 //!
-//! See `api::weather::TestWeatherResponse` and `api::geocoding::GeocodingResult` for
+//! See `api::weather::WeatherResponse` and `api::geocoding::GeocodingResult` for
 //! the deserializable response types and conversion helpers.
 
 pub mod api;
@@ -28,8 +28,8 @@ pub use ui::CurrentWidget;
 
 // --- Weather-API deserialization / conversion types ---
 
-// Re-export weather test structs from api/weather.rs
-pub use api::weather::{CurrentData, DailyData, HourlyData, TestWeatherResponse, WeatherResponse};
+// Re-export weather deserialization structs from api/weather.rs
+pub use api::weather::{CurrentData, DailyData, HourlyData, WeatherResponse};
 
 // Re-export geocoding types from api/geocoding.rs
 pub use api::geocoding::GeocodingResult;
