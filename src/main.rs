@@ -46,6 +46,14 @@ where
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .with_writer(std::io::stderr)
+        .init();
+
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
@@ -138,6 +146,8 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Resul
     // (which changes on refresh / new location data).
     let mut displayed_view = view_signature(&app);
 
+    tracing::info!("starting event loop");
+
     loop {
         if view_signature(&app) != displayed_view {
             terminal.clear()?;
@@ -153,6 +163,7 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Resul
         app.update(msg);
 
         if app.is_quitting() {
+            tracing::info!("shutting down");
             break;
         }
 
@@ -217,7 +228,7 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> Resul
         };
         let base_dir = config::config_path();
         if let Err(e) = config::save_config(&cfg, app.last_config_path.as_deref(), &base_dir) {
-            eprintln!("Failed to save config: {e}");
+            tracing::error!(error = %e, "failed to save config");
         }
     }
 

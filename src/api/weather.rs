@@ -115,29 +115,40 @@ struct ApiError {
     pub reason: Option<String>,
 }
 
+#[tracing::instrument(skip_all, fields(lat, lon))]
 pub async fn fetch(lat: f64, lon: f64) -> Result<(CurrentWeather, HourlyForecast, DailyForecast), AppError> {
+    tracing::info!(%lat, %lon, "fetching weather forecast");
+
     let url = client::forecast_url(lat, lon);
     let resp = client::HTTP_CLIENT
         .get(&url)
         .send()
         .await
-        .map_err(|e| AppError::Network(e.to_string()))?;
+        .map_err(|e| {
+            tracing::error!(error = %e, "weather fetch failed");
+            AppError::Network(e.to_string())
+        })?;
 
     let status = resp.status();
     if !status.is_success() {
         let body = resp.text().await.unwrap_or_default();
         if let Ok(api_err) = serde_json::from_str::<ApiError>(&body) {
             if let Some(reason) = api_err.reason {
+                tracing::error!(%status, reason, "weather fetch returned API error");
                 return Err(AppError::Api(reason));
             }
         }
+        tracing::error!(%status, "weather fetch returned HTTP error");
         return Err(AppError::Api(format!("HTTP {} — {}", status.as_u16(), body)));
     }
 
     let parsed: WeatherResponse = resp
         .json()
         .await
-        .map_err(|e| AppError::Api(format!("Failed to decode response: {e}")))?;
+        .map_err(|e| {
+            tracing::error!(error = %e, "weather fetch failed");
+            AppError::Api(format!("Failed to decode response: {e}"))
+        })?;
     let models = parsed.try_into()?;
     Ok(models)
 }

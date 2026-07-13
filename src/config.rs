@@ -45,12 +45,14 @@ fn do_load_config(config_dir: &Path) -> Option<(SavedConfig, PathBuf)> {
     let cfg = config_dir.join(CONFIG_FILE_NAME);
     if let Ok(contents) = std::fs::read_to_string(&cfg) {
         if let Ok(config) = toml::from_str(&contents) {
+            tracing::info!(path = %cfg.display(), "loaded config");
             return Some((config, cfg));
         }
     }
     let cwd = PathBuf::from(CONFIG_FILE_NAME);
     if let Ok(contents) = std::fs::read_to_string(&cwd) {
         if let Ok(config) = toml::from_str(&contents) {
+            tracing::info!(path = %cwd.display(), "loaded config");
             return Some((config, cwd));
         }
     }
@@ -114,6 +116,7 @@ pub fn save_config(
     std::fs::write(&target, contents)
         .map_err(|e| AppError::Config(format!("Failed to write config: {e}")))?;
 
+    tracing::info!(path = %target.display(), "saved config");
     Ok(target)
 }
 

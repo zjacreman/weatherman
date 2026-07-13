@@ -39,17 +39,29 @@ impl From<GeocodingResult> for Location {
     }
 }
 
+#[tracing::instrument(skip_all)]
 pub async fn search(name: &str) -> Result<Vec<Location>, AppError> {
+    tracing::info!(query = %name, "searching location");
+
     let url = client::geocoding_url(name, 10);
     let resp: GeocodingResponse = client::HTTP_CLIENT
         .get(&url)
         .send()
         .await
-        .map_err(|e| AppError::Network(e.to_string()))?
+        .map_err(|e| {
+            tracing::error!(error = %e, "geocoding search failed");
+            AppError::Network(e.to_string())
+        })?
         .error_for_status()
-        .map_err(|e| AppError::Geocoding(e.to_string()))?
+        .map_err(|e| {
+            tracing::error!(error = %e, "geocoding search returned HTTP error");
+            AppError::Geocoding(e.to_string())
+        })?
         .json()
         .await
-        .map_err(|e| AppError::Geocoding(format!("Failed to decode geocoding response: {e}")))?;
+        .map_err(|e| {
+            tracing::error!(error = %e, "geocoding search failed");
+            AppError::Geocoding(format!("Failed to decode geocoding response: {e}"))
+        })?;
     Ok(resp.result.into_iter().map(Location::from).collect())
 }
