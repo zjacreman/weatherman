@@ -14,8 +14,8 @@ pub mod ui;
 
 // Re-export key types from sub-modules for convenient downstream access.
 pub use app::{
-    App, AppState, CurrentWeather, DailyForecast, HourlyForecast, Location, Message, TempUnit,
-    WmoWeather,
+    App, AppError, AppState, CurrentWeather, DailyForecast, HourlyForecast, Location, Message,
+    TempUnit, WmoWeather,
 };
 pub use config::SavedConfig;
 pub use ratatui::style::Color;

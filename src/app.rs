@@ -299,6 +299,27 @@ impl TempUnit {
     }
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum AppError {
+    Network(String),
+    Geocoding(String),
+    Api(String),
+    Config(String),
+}
+
+impl std::fmt::Display for AppError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AppError::Network(msg) => write!(f, "Network error: {msg}"),
+            AppError::Geocoding(msg) => write!(f, "Geocoding error: {msg}"),
+            AppError::Api(msg) => write!(f, "API error: {msg}"),
+            AppError::Config(msg) => write!(f, "Config error: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for AppError {}
+
 pub use crossterm::event::KeyEvent;
 
 #[derive(Debug, Clone)]

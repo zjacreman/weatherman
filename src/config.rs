@@ -11,6 +11,7 @@
 //! `HOME`-only lookup broke persistence on Windows because `HOME` is rarely
 //! set outside Unix-like shells.
 
+use crate::app::AppError;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -97,18 +98,21 @@ pub fn save_config(
     config: &SavedConfig,
     last_config_path: Option<&Path>,
     config_dir: &Path,
-) -> Result<PathBuf, Box<dyn std::error::Error>> {
+) -> Result<PathBuf, AppError> {
     let target = match last_config_path {
         Some(p) => p.to_path_buf(),
         None => config_dir.join(CONFIG_FILE_NAME),
     };
 
     if let Some(parent) = target.parent() {
-        std::fs::create_dir_all(parent)?;
+        std::fs::create_dir_all(parent)
+            .map_err(|e| AppError::Config(format!("Failed to create config directory: {e}")))?;
     }
 
-    let contents = toml::to_string_pretty(config)?;
-    std::fs::write(&target, contents)?;
+    let contents = toml::to_string_pretty(config)
+        .map_err(|e| AppError::Config(format!("Failed to serialize config: {e}")))?;
+    std::fs::write(&target, contents)
+        .map_err(|e| AppError::Config(format!("Failed to write config: {e}")))?;
 
     Ok(target)
 }
@@ -130,7 +134,7 @@ pub fn save_config_to_dir(
     config: &SavedConfig,
     last_config_path: Option<&Path>,
     dir: &Path,
-) -> Result<PathBuf, Box<dyn std::error::Error>> {
+) -> Result<PathBuf, AppError> {
     save_config(config, last_config_path, dir)
 }
 

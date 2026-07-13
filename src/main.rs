@@ -22,17 +22,17 @@ use ratatui::Terminal;
 use tokio::sync::mpsc;
 
 mod config;
-use app::{App, AppState, Message, TempUnit, WmoWeather};
+use app::{App, AppError, AppState, Message, TempUnit, WmoWeather};
 use chrono::Timelike;
 use chrono_tz::Tz;
 
 const TICK_RATE: u64 = 1000; // ms — each tick = 1 real second
 
 /// Attempt an API task with retries. Returns the first successful result or the last error.
-async fn with_retries<F, Fut, T, E>(max_attempts: u32, task_factory: F) -> Result<T, E>
+async fn with_retries<F, Fut, T>(max_attempts: u32, task_factory: F) -> Result<T, AppError>
 where
     F: Fn() -> Fut,
-    Fut: std::future::Future<Output = Result<T, E>>,
+    Fut: std::future::Future<Output = Result<T, AppError>>,
 {
     let mut last_err = None;
     for attempt in 1..=max_attempts {

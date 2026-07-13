@@ -1,7 +1,6 @@
-use anyhow::Result;
 use serde::Deserialize;
 use crate::api::client;
-use crate::app::Location;
+use crate::app::{AppError, Location};
 
 #[derive(Debug, Deserialize)]
 pub struct GeocodingResponse {
@@ -40,14 +39,17 @@ impl From<GeocodingResult> for Location {
     }
 }
 
-pub async fn search(name: &str) -> Result<Vec<Location>> {
+pub async fn search(name: &str) -> Result<Vec<Location>, AppError> {
     let url = client::geocoding_url(name, 10);
     let resp: GeocodingResponse = client::HTTP_CLIENT
         .get(&url)
         .send()
-        .await?
-        .error_for_status()?
+        .await
+        .map_err(|e| AppError::Network(e.to_string()))?
+        .error_for_status()
+        .map_err(|e| AppError::Geocoding(e.to_string()))?
         .json()
-        .await?;
+        .await
+        .map_err(|e| AppError::Geocoding(format!("Failed to decode geocoding response: {e}")))?;
     Ok(resp.result.into_iter().map(Location::from).collect())
 }

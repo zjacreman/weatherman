@@ -1,7 +1,6 @@
-use anyhow::Result;
 use serde::Deserialize;
 use crate::api::client;
-use crate::app::{CurrentWeather, HourlyForecast, DailyForecast};
+use crate::app::{AppError, CurrentWeather, HourlyForecast, DailyForecast};
 
 // ============================================================
 // Internal Option-wrapped structs — used only for fetch
@@ -133,10 +132,10 @@ pub type DailyData = TestDailyData;
 // ============================================================
 
 /// Convert an Option-wrapped fetch response into domain models.
-fn extract_models(resp: FetchWeatherResponse) -> anyhow::Result<(CurrentWeather, HourlyForecast, DailyForecast)> {
-    let c = resp.current.ok_or_else(|| anyhow::anyhow!("Missing current data"))?;
-    let h = resp.hourly.ok_or_else(|| anyhow::anyhow!("Missing hourly data"))?;
-    let d = resp.daily.ok_or_else(|| anyhow::anyhow!("Missing daily data"))?;
+fn extract_models(resp: FetchWeatherResponse) -> Result<(CurrentWeather, HourlyForecast, DailyForecast), AppError> {
+    let c = resp.current.ok_or_else(|| AppError::Api("Missing current data".to_string()))?;
+    let h = resp.hourly.ok_or_else(|| AppError::Api("Missing hourly data".to_string()))?;
+    let d = resp.daily.ok_or_else(|| AppError::Api("Missing daily data".to_string()))?;
 
     Ok((
         CurrentWeather {
@@ -233,24 +232,28 @@ struct ApiError {
     pub reason: Option<String>,
 }
 
-pub async fn fetch(lat: f64, lon: f64) -> Result<(CurrentWeather, HourlyForecast, DailyForecast)> {
+pub async fn fetch(lat: f64, lon: f64) -> Result<(CurrentWeather, HourlyForecast, DailyForecast), AppError> {
     let url = client::forecast_url(lat, lon);
     let resp = client::HTTP_CLIENT
         .get(&url)
         .send()
-        .await?;
+        .await
+        .map_err(|e| AppError::Network(e.to_string()))?;
 
     let status = resp.status();
     if !status.is_success() {
         let body = resp.text().await.unwrap_or_default();
         if let Ok(api_err) = serde_json::from_str::<ApiError>(&body) {
             if let Some(reason) = api_err.reason {
-                return Err(anyhow::anyhow!("{}", reason));
+                return Err(AppError::Api(reason));
             }
         }
-        return Err(anyhow::anyhow!("HTTP {} — {}", status.as_u16(), body));
+        return Err(AppError::Api(format!("HTTP {} — {}", status.as_u16(), body)));
     }
 
-    let parsed: FetchWeatherResponse = resp.json().await?;
+    let parsed: FetchWeatherResponse = resp
+        .json()
+        .await
+        .map_err(|e| AppError::Api(format!("Failed to decode response: {e}")))?;
     extract_models(parsed)
 }
